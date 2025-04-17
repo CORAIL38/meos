@@ -100,6 +100,9 @@
     <Manifest>
       <AdditionalManifestFiles>meos_dpi_manifest.xml %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
+    <PostBuildEvent>
+      <Command>xcopy /y /d ".\dll\libmySQL.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -119,6 +122,10 @@
     <Manifest>
       <AdditionalManifestFiles>meos_dpi_manifest.xml %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
+    <PostBuildEvent>
+      <Command>xcopy /y /d ".\dll\libmySQL.dll" "$(OutDir)"
+xcopy /y /d ".\dll\libharu.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
