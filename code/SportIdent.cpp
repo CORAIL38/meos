@@ -1353,8 +1353,9 @@ void SportIdent::getSI6DataExt(HANDLE hComm)
 
 void SportIdent::getSI9DataExt(HANDLE hComm)
 {
-  BYTE b[128*5];
-  memset(b, 0, 128*5);
+  constexpr int maxblock = 6;
+  BYTE b[128*maxblock];
+  memset(b, 0, 128* maxblock);
   BYTE c[16];
   int miliVolt = 0;
 //	STX, 0xE1, 0x01, BN, CRC1,
@@ -1368,49 +1369,50 @@ void SportIdent::getSI9DataExt(HANDLE hComm)
   bool readBattery = false;
   DWORD written=0;
 
-  for(int k=0; k < limit; k++){
-    c[0]=STX;
-    c[1]=0xEF;
-    c[2]=0x01;
-    c[3]=blocks[k];
-    setCRC(c+1);
-    c[6]=ETX;
+  for (int k = 0; k < limit; k++) {
+    c[0] = STX;
+    c[1] = 0xEF;
+    c[2] = 0x01;
+    c[3] = blocks[k];
+    setCRC(c + 1);
+    c[6] = ETX;
 
-    written=0;
+    written = 0;
     WriteFile(hComm, c, 7, &written, NULL);
 
-    if (written==7) {
+    if (written == 7) {
       Sleep(50);
       BYTE bf[256];
       memset(bf, 0, 256);
 
-      int read=readBytes(bf, 128+9, hComm);
+      int read = readBytes(bf, 128 + 9, hComm);
 
-      if (read==0) {
+      if (read == 0) {
         debugLog(L"TIMING");
         Sleep(300);
-        read = readBytes(bf, 128+9, hComm);
+        read = readBytes(bf, 128 + 9, hComm);
       }
 
-      if (bf[0]==STX && bf[1]==0xEf) {
-        if (checkCRC(bf+1, 200)) {
-          memcpy(b+k*128, bf+6, 128);
-        if (k == 0) {
-          int series = b[24] & 15;
-          if (series == 15) {
-            int nPunch = min(int(b[22]), 128);
-            blocks = blocks_10_11_SIAC;
-            limit = 2 + (nPunch+31) / 32;   // Read Block 0, Block 1 + punches
-
-            int cardNo = GetExtCardNumber(b);
-            if (cardNo > 8000000 && cardNo < 9000000) {
-              readBattery = readVoltage;
+      if (bf[0] == STX && bf[1] == 0xEf) {
+        if (checkCRC(bf + 1, 200)) {
+          memcpy(b + k * 128, bf + 6, 128);
+          if (k == 0) {
+            int series = b[24] & 15;
+            if (series == 15) {
+              int nPunch = min<uint32_t>(int(b[22]), 128u);
+              blocks = blocks_10_11_SIAC;
+              limit = 2 + (nPunch + 31) / 32;   // Read Block 0, Block 1 + punches
+              if (limit > maxblock)
+                limit = maxblock;
+              int cardNo = GetExtCardNumber(b);
+              if (cardNo > 8000000 && cardNo < 9000000) {
+                readBattery = readVoltage;
+              }
+            }
+            else {
+              limit = 2; // Card 8, 9, p, t
             }
           }
-          else {
-            limit = 2; // Card 8, 9, p, t
-          }
-        }
 
         }
         else {

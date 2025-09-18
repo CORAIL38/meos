@@ -725,38 +725,40 @@ pRunner TabRunner::save(gdioutput &gdi, int runnerId, bool willExit) {
 
       r->setBib(bib, num, num>0 && !lockedForking);
     }
-    ListBoxInfo& rcourse = dynamic_cast<ListBoxInfo&>(gdi.getBaseInfo("RCourse"));
-    if (rcourse.changed() || classChanged) {
-      int crsId = gdi.getSelectedItem("RCourse").first;
-      if (crsId > 0 && r->getCourseId() != -1) {
-        pClass cls = r->getClassRef(true);
-        pCourse crs = oe->getCourse(crsId);
-        vector<pCourse> courses;
-        if (cls && crs) {
-          cls->getCourses(r->getLegNumber(), courses);
-          set<int> crsIds;
-          for (auto c : courses)
-            crsIds.insert(c->getId());
+    if (gdi.hasWidget("RCourse")) {
+      ListBoxInfo& rcourse = dynamic_cast<ListBoxInfo&>(gdi.getBaseInfo("RCourse"));
+      if (rcourse.changed() || classChanged) {
+        int crsId = gdi.getSelectedItem("RCourse").first;
+        if (crsId > 0 && r->getCourseId() != -1) {
+          pClass cls = r->getClassRef(true);
+          pCourse crs = oe->getCourse(crsId);
+          vector<pCourse> courses;
+          if (cls && crs) {
+            cls->getCourses(r->getLegNumber(), courses);
+            set<int> crsIds;
+            for (auto c : courses)
+              crsIds.insert(c->getId());
 
-          if (crsIds.count(crsId) == 0) {
-            vector<pRunner> clsRunner;
-            oe->getRunners(cls->getId(), -1, clsRunner, false);
-            bool ok = clsRunner.size() < 2;
-            for (auto cr : clsRunner) {
-              if (cr->getCourseId() > 0 && !crsIds.count(cr->getCourseId())) {
-                ok = true;
-                break;
+            if (crsIds.count(crsId) == 0) {
+              vector<pRunner> clsRunner;
+              oe->getRunners(cls->getId(), -1, clsRunner, false);
+              bool ok = clsRunner.size() < 2;
+              for (auto cr : clsRunner) {
+                if (cr->getCourseId() > 0 && !crsIds.count(cr->getCourseId())) {
+                  ok = true;
+                  break;
+                }
               }
-            }
 
-            if (!ok) {
-              if (!gdi.ask(L"ask:usecourseinclass"))
-                crsId = 0;
+              if (!ok) {
+                if (!gdi.ask(L"ask:usecourseinclass"))
+                  crsId = 0;
+              }
             }
           }
         }
+        r->setCourseId(crsId);
       }
-      r->setCourseId(crsId);
     }
 
     if (r->getCard() && r->useCoursePool() && r->getCourseId() == 0) {

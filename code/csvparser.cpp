@@ -963,7 +963,7 @@ bool csvparser::checkSIConfigLine(const oEvent &oe, const CSVLineWrapper &sp, SI
     }
   }
  
-  if ( (finish > 0 && finish != NOTIME) || punches.size() > 2) {
+  if ( (finish > 0 && finish != NOTIME) || punches.size() > 0 || (start > 0 && start != NOTIME)) {
     card.clear(0);
     card.CardNumber = cardNo;
     if (start > 0 && start != NOTIME) {
