@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -858,8 +858,11 @@ void oEvent::loadGeneralResults(bool forceReload, bool loadFromDisc) const {
         dr.load(res2[k]);
         string tag = DynamicResult::undecorateTag(dr.getTag());
         int iter = 1;
-        while (tags.count(tag)) 
-          tag = dr.getTag() + + "_v" + itos(++iter);
+        while (tags.count(tag)) {
+          tag = dr.getTag() + +"_v" + itos(++iter);
+          if (tag.length() > 24)
+            tag = tag.substr(tag.length() - 24);
+        }
         if (iter > 1)
           dr.setTag(tag);
 
@@ -984,12 +987,12 @@ void oEvent::calculateTeamResultAtControl(const set<int> &classId, int leg, int 
     if (!classId.empty() && !classId.count(t.getClassId(false)))
       continue;
     temp.reset();
-    t.fillSpeakerObject(leg, courseControlId, -1, totalResults, temp);
+    t.fillSpeakerObject(leg, -1, { courseControlId }, totalResults, temp);
     if (!temp.owner)
       continue;
     TeamResultContainer trc;
-    trc.runningTime = temp.runningTime.time;
-    trc.status = temp.status;
+    trc.runningTime = temp.result[0].runningTime.time;
+    trc.status = temp.result[0].status;
     trc.team = &t;
     objs.push_back(trc);
   }
@@ -1225,5 +1228,126 @@ void oEvent::computePreliminarySplitResults(const set<int> &classes) const {
       computeResult(timeRunnerIx, false);
       computeResult(totalTimeRunnerIx, true);
     }
+  }
+}
+
+void oEvent::computeRogainingStatistics() const {
+  vector<pClass> rogainingClasses;
+  set<int> rgClassId;
+  for (auto &c : Classes) {
+    if (!c.isRemoved() && c.isRogaining()) {
+      rogainingClasses.push_back(pClass(&c));
+      rgClassId.insert(c.getId());
+    }
+  }
+
+  map<pair<int, int>, vector<pair<int, pRunner>>> legToTimeRunner;
+  vector<pRunner> rogainingR;
+  for (auto &r : Runners) {
+    if (!r.isRemoved() && r.getCard() && rgClassId.count(r.getClassId(false))) {
+      auto addPunch = [&legToTimeRunner, &r](int code, int time, const oPunch &next) {
+        int to = next.getTypeCode();
+        if (code == to)
+          return;
+        int rt = next.getTimeInt() - time;
+        if (rt > 0)
+          legToTimeRunner[make_pair(code, to)].emplace_back(rt, pRunner(&r));
+      };
+      pCard crd = r.getCard();
+      pCourse crs = r.getCourse(false);
+      if (!crs)
+        continue;
+      rogainingR.push_back(pRunner(&r));
+      int sp = crs->getStartPunchType();
+      int fp = crs->getFinishPunchType();
+      const oPunch *last = nullptr;
+      for (auto &p : crd->punches) {
+        if (p.isStart(sp)) {
+          last = &p;
+        }
+        else if (p.isFinish(fp)) {
+          if (last) 
+            addPunch(last->getTypeCode(), last->getTimeInt(), p);
+          break;
+        }
+        else if (p.getTypeCode() >= 30 && p.getRogainingControl(*crs)) {
+          if (last)
+            addPunch(last->getTypeCode(), last->getTimeInt(), p);
+          else
+            addPunch(oPunch::PunchStart, r.getStartTime(), p);
+          last = &p;
+        }
+      }
+    }
+  }
+
+  struct ClassStatInfo {
+    map<pair<int, int>, oClass::RogainingStat> statMap;
+    vector<tuple<int, int, int, pRunner>> fromToTimeRunner;
+  };
+
+  map<int, ClassStatInfo> classData;
+  map<int, pair<double, double>> runnerIdToScoreWeight;
+
+  for (auto &[leg, rtRunner] : legToTimeRunner) {
+    sort(rtRunner.begin(), rtRunner.end());
+
+    if (rtRunner.size() > 1) {
+      double weight = sqrt(rtRunner.size());
+      double baseT = rtRunner[0].first;
+      for (auto &[rt, r] : rtRunner) {
+        double score = double(rt) / baseT;
+        auto &sw = runnerIdToScoreWeight[r->getId()];
+        sw.first += score * weight;
+        sw.second += weight;
+
+        auto &cd = classData[r->getClassId(false)];
+        auto &stat = cd.statMap[leg];
+        if (stat.bestTime == -1)
+          stat.bestTime = rt;
+        else
+          stat.bestTime = min(rt, stat.bestTime);
+
+        ++stat.numCompetitors;
+        stat.globalBest = baseT;
+        cd.fromToTimeRunner.emplace_back(leg.first, leg.second, rt, r);
+      }
+    }
+  }
+
+  for (pRunner r : rogainingR) {
+    double v = 1.0;
+    if (auto res = runnerIdToScoreWeight.find(r->getId()); res != runnerIdToScoreWeight.end() && res->second.second > 1.0)
+      v = res->second.first / res->second.second;
+
+    r->rogainingBaseSpeed.update(*this, v);
+    r->rogainingLegSplitPlace.clear();
+  }
+
+  for (pClass c : rogainingClasses) {
+    auto res = classData.find(c->getId());
+
+    if (res != classData.end()) {
+      c->rogainingStatistics.update(*this, std::move(res->second.statMap));
+      sort(res->second.fromToTimeRunner.begin(), res->second.fromToTimeRunner.end());
+      // Compute and store leg places
+      int oldFrom = -1, oldTo = -1;
+      int place = 1, count = 1, oldTime = 0;
+      for (auto &[from, to, time, r] : res->second.fromToTimeRunner) {
+        if (from != oldFrom || oldTo != to) {
+          place = 1;
+          count = 1;
+          oldTo = to;
+          oldFrom = from;
+          oldTime = time;
+        }
+        if (time > oldTime)
+          place = count;
+        r->rogainingLegSplitPlace[make_pair(from, to)] = make_pair(time, place);
+        count++;
+      }
+    }
+    else
+      c->rogainingStatistics.update(*this, {});
   }
 }

@@ -1,6 +1,6 @@
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ class HTMLWriter {
   string end;
 
   string page;
-
+  bool useTables = false;
   static map <string, shared_ptr<HTMLWriter>> tCache;
 
   string localize(const string &in);
@@ -64,15 +64,23 @@ class HTMLWriter {
   };
 
   template<typename T, typename TI>
-  static void formatTL(std::ostream& fout,
-    ImageWriter& imageWriter,
-    const map< pair<gdiFonts, wstring>, pair<string, string> >& styles,
-    const T& tl,
-    double& yscale,
-    double& xscale,
-    int& offsetY,
-    int& offsetX);
+  static void formatTL(std::ostream &fout,
+                       ImageWriter &imageWriter,
+                       const map< pair<gdiFonts, wstring>, pair<string, string> > &styles,
+                       const T &tl,
+                       double &yscale,
+                       double &xscale,
+                       int &offsetY,
+                       int &offsetX);
 
+  template<typename T, typename TI>
+  static void formatTable(std::ostream &fout,
+                          ImageWriter &imgWriter,
+                          const map<pair<gdiFonts, wstring>, pair<string, string>> &styles,
+                          const T &tl,
+                          bool simpleFormat,
+                          int marginPercent,
+                          double scaleX);
 
   static void parseTagName(const string& str, string& tag, wstring& name);
 

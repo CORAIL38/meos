@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -89,16 +89,16 @@ vector<uint8_t> Image::loadResourceToMemory(LPCTSTR lpName, LPCTSTR lpType)  {
   return result;
 }
 
-pair<HBITMAP, uint8_t*> Image::read_png(vector<uint8_t> &&inData, int &width, int &height, ImageMethod method) {
+tuple<HBITMAP, uint8_t*, bool> Image::read_png(vector<uint8_t> &&inData, int &width, int &height, ImageMethod method) {
   PngData inputStream;
   inputStream.memory = std::move(inData);
   png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (!png) 
-    return make_pair(nullptr, nullptr);
+    return tuple(nullptr, nullptr, false);
 
   png_infop info = png_create_info_struct(png);
   if (!info) 
-    return make_pair(nullptr, nullptr);
+    return tuple(nullptr, nullptr, false);
 
   png_set_read_fn(png, &inputStream, readDataFromInputStream);
 
@@ -165,7 +165,7 @@ pair<HBITMAP, uint8_t*> Image::read_png(vector<uint8_t> &&inData, int &width, in
   HDC hdcScreen = GetDC(NULL);
   hbmp = CreateDIBSection(hdcScreen, &bminfo, DIB_RGB_COLORS, &pvImageBits, NULL, 0);
   ReleaseDC(NULL, hdcScreen);
-
+  bool hasAlpha = false;
   // extract the image into the HBITMAP
   const size_t cbStride = width * 4;
   const size_t cbImage = cbStride * height;
@@ -194,6 +194,8 @@ pair<HBITMAP, uint8_t*> Image::read_png(vector<uint8_t> &&inData, int &width, in
         row[x + 1] = src[x + 1]; // Green 
         row[x + 0] = src[x + 2]; // Blue
         row[x + 3] = src[x + 3];
+        if (row[x + 3] < 255u)
+          hasAlpha = true;
       }
     }
     else if (method == ImageMethod::WhiteTransparent) {
@@ -211,7 +213,7 @@ pair<HBITMAP, uint8_t*> Image::read_png(vector<uint8_t> &&inData, int &width, in
       }
     }
   }
-  return make_pair(hbmp, dst);
+  return tuple(hbmp, dst, hasAlpha);
 }
 
 uint64_t Image::computeHash(const vector<uint8_t>& data) {
@@ -240,7 +242,7 @@ void Image::read_file(const wstring& filename, vector<uint8_t>& data) {
   fin.close();
 }
 
-pair<HBITMAP, uint8_t*> Image::read_png_file(const wstring &filename, int &width, int &height, uint64_t &hash, ImageMethod method) {
+tuple<HBITMAP, uint8_t*, bool> Image::read_png_file(const wstring &filename, int &width, int &height, uint64_t &hash, ImageMethod method) {
   width = 0;
   height = 0;
   PngData inputStream;
@@ -249,13 +251,13 @@ pair<HBITMAP, uint8_t*> Image::read_png_file(const wstring &filename, int &width
   return read_png(std::move(inputStream.memory), width, height, method);
 }
 
-pair<HBITMAP, uint8_t*> Image::read_png_resource(LPCTSTR lpName, LPCTSTR lpType, int &width, int &height, ImageMethod method) {
+tuple<HBITMAP, uint8_t*, bool> Image::read_png_resource(LPCTSTR lpName, LPCTSTR lpType, int &width, int &height, ImageMethod method) {
   width = 0;
   height = 0;
   PngData inputStream;
   inputStream.memory = loadResourceToMemory(lpName, lpType);
   if (inputStream.memory.empty())
-    return make_pair(nullptr, nullptr);
+    return tuple(nullptr, nullptr, false);
   return read_png(std::move(inputStream.memory), width, height, method);
 }
 
@@ -265,37 +267,93 @@ Image::~Image() = default;
 
 // Loads image (or use alreadly loaded version
 HBITMAP Image::loadImage(uint64_t resource, ImageMethod method) {
-  if (images.count(resource))
-    return images[resource].image;
+  if (images.count(resource)) {
+    if (!images[resource].image)
+      reloadImage(resource, method);
 
+    return images[resource].image;
+  }
   int width, height;
-  auto hbmp = read_png_resource(MAKEINTRESOURCE(resource), _T("PNG"), width, height, method);
-  if (hbmp.first != nullptr) {
-    images[resource].image = hbmp.first;
-    images[resource].pixels = hbmp.second;
+  auto [hImage, pixels, alpha] = read_png_resource(MAKEINTRESOURCE(resource), _T("PNG"), width, height, method);
+  if (hImage != nullptr) {
+    images[resource].image = hImage;
+    images[resource].pixels = pixels;
+    images[resource].hasTrueAlpha = alpha;
     images[resource].width = width;
     images[resource].height = height;
   }
-  return hbmp.first;
+  return hImage;
 }
 
 int Image::getWidth(uint64_t resource) {
+  if (!resource)
+    return -1;
   loadImage(resource, ImageMethod::Default);
   return images[resource].width;
 }
 
 int Image::getHeight(uint64_t resource) {
+  if (!resource)
+    return -1;
   loadImage(resource, ImageMethod::Default);
   return images[resource].height;
 }
 
-void Image::drawImage(uint64_t resource, ImageMethod method, HDC hDC, int x, int y, int width, int height) {
+HBITMAP Image::getVersion(uint64_t resource, int sx, int sy) {
+  auto res = images.find(resource);
+  if (res == images.end())
+    return nullptr;
+  int wSrc = sx;
+  int hSrc = sy;
+
+  if (sx < 0)
+    wSrc = (res->second.width * sy) / res->second.height;
+ 
+  if (sy < 0)
+    hSrc = (res->second.height * sx) / res->second.width;
+
+  return res->second.getVersion(wSrc, hSrc);
+}
+
+void Image::drawImage(uint64_t resource, ImageMethod method, HDC hDC,
+                      int x, int y, int width, int height,
+                      int srcOffX, int srcOffY, int srcWidth, int srcHeight) {
   loadImage(resource, method);
   auto res = images.find(resource);
   if (res == images.end())
     return;
-  
-  HBITMAP bmp = res->second.getVersion(width, height);
+
+  int wSrc = width;
+  int hSrc = height;
+
+  bool cmpW = false;
+  bool cmpH = false;
+
+  if (srcWidth <= 0 || (srcWidth == res->second.width && srcOffX == 0))
+    srcWidth = width;
+  else {
+    wSrc = (res->second.width * width) / srcWidth;
+    cmpW = true;
+  }
+
+  if (srcHeight <= 0 || (srcHeight == res->second.height && srcOffY == 0))
+    srcHeight = height;
+  else {
+    hSrc =  (res->second.height * height) / srcHeight;
+    cmpH = true;
+  }
+
+  HBITMAP bmp = res->second.getVersion(wSrc, hSrc);
+
+  if (cmpW) {
+    srcOffX = (wSrc * srcOffX) / res->second.width;
+    srcWidth = (wSrc * srcWidth) / res->second.width;
+  }
+
+  if (cmpH) {
+    srcOffY = (hSrc * srcOffY) / res->second.height;
+    srcHeight = (hSrc * srcHeight) / res->second.height;
+  }
 
   HDC memdc = CreateCompatibleDC(hDC);
   SelectObject(memdc, bmp);
@@ -304,8 +362,35 @@ void Image::drawImage(uint64_t resource, ImageMethod method, HDC hDC, int x, int
   bf.BlendOp = AC_SRC_OVER;
   bf.BlendFlags = 0;
   bf.SourceConstantAlpha = 0xFF;  
-  bf.AlphaFormat = AC_SRC_ALPHA;    
-  AlphaBlend(hDC, x, y, width, height, memdc, 0, 0, width, height, bf);
+  bf.AlphaFormat = AC_SRC_ALPHA;
+ 
+  if (srcOffX > 0) {
+    if (srcOffX + width > wSrc)
+      width = max<int>(0, wSrc - srcOffX);
+  }
+  else if (srcOffX < 0) {
+    x -= srcOffX;
+    width += srcOffX;
+    srcOffX = 0;
+  }
+  if (srcOffX + width > wSrc) {
+    width = wSrc - srcOffX;
+  }
+
+  if (srcOffY > 0) {
+    if (srcOffY + height > hSrc)
+      height = max<int>(0, hSrc - srcOffY);
+  }
+  else if (srcOffY < 0) {
+    y -= srcOffY;
+    height += srcOffY;
+    srcOffY = 0;
+  }
+  if (srcOffY + height > hSrc) {
+    height = hSrc - srcOffY;
+  }
+
+  AlphaBlend(hDC, x, y, width, height, memdc, srcOffX, srcOffY, width, height, bf);
 
   DeleteDC(memdc);
 }
@@ -326,9 +411,10 @@ uint64_t Image::loadFromFile(const wstring& path, ImageMethod method) {
     Bmp &out = res.first->second;
     out.fileName = wstring(name) + ext;
     out.rawData = bytes;
-    auto res = read_png(std::move(bytes), out.width, out.height, method);
-    out.image = res.first;
-    out.pixels = res.second;
+    auto [hImage, pixels, alpha] = read_png(std::move(bytes), out.width, out.height, method);
+    out.image = hImage;
+    out.pixels = pixels;
+    out.hasTrueAlpha = alpha;
   }
   return hash;
 }
@@ -356,9 +442,10 @@ void Image::reloadImage(uint64_t imgId, ImageMethod method) {
   if (res != images.end() && res->second.rawData.size() > 0) {
     auto copy = res->second.rawData;
     res->second.destroy();
-    auto img = read_png(std::move(copy), res->second.width, res->second.height, method);
-    res->second.image = img.first;
-    res->second.pixels = img.second;
+    auto [hImage, pixels, alpha] = read_png(std::move(copy), res->second.width, res->second.height, method);
+    res->second.image = hImage;
+    res->second.pixels = pixels;
+    res->second.hasTrueAlpha = alpha;
     return;
   }
   throw meosException("Unknown image " + itos(imgId));
@@ -390,15 +477,24 @@ void Image::Bmp::destroy() {
   resamples.clear();
 }
 
-HBITMAP Image::Bmp::getVersion(int width, int height) {
+HBITMAP Image::Bmp::getVersion(int &width, int &height) {
   if (image == nullptr)
     return nullptr;
 
-  if (width == this->width && height == this->height)
+  if (width == this->width && height == this->height && !hasTrueAlpha)
     return image;
 
-  if (auto res = resamples.find(make_pair(width, height)); res != resamples.end())
-    return res->second;
+  for (auto &[wh, img] : resamples) {
+    double diffx = std::abs(wh.first - width);
+    double diffy = std::abs(wh.second - height);
+
+    if ((diffx / width < 0.01 || diffx <= 1) && (diffy / height < 0.01 || diffy <= 1)) {
+      width = wh.first;
+      height = wh.second;
+      return img;
+    }
+  }
+
 
   HBITMAP version = resample(width, height);
   resamples[make_pair(width, height)] = version;
@@ -407,6 +503,10 @@ HBITMAP Image::Bmp::getVersion(int width, int height) {
 }
 
 HBITMAP Image::Bmp::resample(int w, int h) {
+  double limit = min<double>(6e9, numeric_limits<size_t>::max() / 2);
+  if (w <= 0 || h <= 0 || double(h) * double(w) * 9 * 16 > limit)
+    throw std::exception("Error in image handling");
+
   // initialize return value
   HBITMAP hbmp = NULL;
 
@@ -439,13 +539,13 @@ HBITMAP Image::Bmp::resample(int w, int h) {
     float a = 0;
 
     uint8_t getR() const {
-      return uint8_t(min(255, int(r)));
+      return uint8_t(min(255, int(r * a / 255.f)));
     }
     uint8_t getG() const {
-      return uint8_t(min(255, int(g)));
+      return uint8_t(min(255, int(g * a / 255.f)));
     }
     uint8_t getB() const {
-      return uint8_t(min(255, int(b)));
+      return uint8_t(min(255, int(b * a / 255.f)));
     }
     uint8_t getA() const {
       return uint8_t(min(255, int(a)));

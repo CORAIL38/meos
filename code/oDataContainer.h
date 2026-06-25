@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -71,6 +71,7 @@ struct oDataInfo {
   char Description[48];
   int decimalSize;
   int decimalScale;
+  vector<pair<wstring, size_t>> fixedSet;
   vector<pair<wstring, wstring>> enumDescription;
   shared_ptr<oDataDefiner> dataDefiner;
   shared_ptr<oDataNotifier> dataNotifier;
@@ -81,10 +82,17 @@ struct oDataInfo {
 
 struct oVariableInt {
   char name[MaxVarNameLength];
-  int *data32;
-  __int64 *data64;
-  oVariableInt() : data32(0), data64(0) {name[0] = 0;}
+  int *data32 = nullptr;
+  __int64 *data64 = nullptr;
+  oVariableInt() {name[0] = 0;}
 };
+
+struct oVariableDouble {
+  char name[MaxVarNameLength];
+  double* data = nullptr;
+  oVariableDouble() { name[0] = 0; }
+};
+
 
 class oVariableString {
   public:
@@ -110,7 +118,7 @@ class oDataConstInterface;
 
 class oDataContainer {
 protected:
-  enum oDataType{oDTInt=1, oDTString=2, oDTStringDynamic=3, oDTStringArray=4};
+  enum oDataType{oDTInt=1, oDTString=2, oDTDouble = 3, oDTStringDynamic = 4, oDTStringArray = 5};
   int dataMaxSize;
   int dataPointer;
   size_t stringIndexPointer;
@@ -124,6 +132,9 @@ protected:
   const oDataInfo *findVariable(const char *Name) const;
   bool formatNumber(int nr, const oDataInfo &di, wchar_t bf[64]) const;
 
+  static void formatDouble(double nr, wchar_t bf[64], bool keepDecimalPoint);
+  static void formatDouble(double nr, char bf[64], bool keepDecimalPoint);
+
   static wstring encodeArray(const vector<wstring> &input);
   static void decodeArray(const string &winput, vector<wstring> &output);
 
@@ -134,6 +145,7 @@ protected:
 
   oDataInfo &addVariable(oDataInfo &odi);
   static string C_INT(const string & name);
+  static string C_DOUBLE(const string& name);
   static string C_INT64(const string & name);
   static string C_SMALLINT(const string & name);
   static string C_TINYINT(const string & name);
@@ -142,6 +154,9 @@ protected:
   static string C_STRING(const string & name, int len);
   static string SQL_quote(const wchar_t *in);
 public:
+
+  static string formatDouble(double d);
+
   enum oIntSize {
     oISDecimal = 28, oISTime = 29, oISTimeAdjust = 26, oISCurrency = 30,
     oISDate = 31, oISDateOrYear = 27, oIS64 = 64,
@@ -160,6 +175,7 @@ public:
 
   void allDataStored(const oBase *ob);
   void getVariableInt(const void *data, list<oVariableInt> &var) const;
+  void getVariableDouble(const void* data, list<oVariableDouble>& var) const;
   void getVariableString(const oBase *data, list<oVariableString> &var) const;
 
   oDataInterface getInterface(void *data, int datasize, oBase *ob);
@@ -183,6 +199,9 @@ public:
 
   bool setInt(oBase *ob, void *data, const char *Name, int V);
   int getInt(const void *data, const char *Name) const;
+
+  bool setDouble(oBase* ob, void* data, const char* name, double value);
+  double getDouble(const void* data, const char* name) const;
 
   bool setInt64(void *data, const char *Name, __int64 V);
   __int64 getInt64(const void *data, const char *Name) const;
@@ -260,6 +279,18 @@ public:
     return oDC->isInt(name.c_str());
   }
 
+  inline bool setDouble(const char* name, double value) {
+    if (oDC->setDouble(oB, Data, name, value)) {
+      oB->updateChanged();
+      return true;
+    }
+    else return false;
+  }
+
+  inline bool setDouble(const string& name, double value) {
+    return setDouble(name.c_str(), value);
+  }
+
   bool isString(const string &name) const {
     return oDC->isString(name.c_str());
   }
@@ -270,6 +301,14 @@ public:
 
   inline int getInt(const string &name) const {
     return oDC->getInt(Data, name.c_str());
+  }
+
+  inline double getDouble(const char* Name) const {
+    return oDC->getDouble(Data, Name);
+  }
+
+  inline double getDouble(const string& name) const {
+    return oDC->getDouble(Data, name.c_str());
   }
 
   inline __int64 getInt64(const char *Name) const
@@ -346,6 +385,10 @@ public:
   inline void getVariableInt(list<oVariableInt> &var) const
     {oDC->getVariableInt(Data, var);}
 
+  inline void getVariableDouble(list<oVariableDouble>& var) const {
+    oDC->getVariableDouble(Data, var);
+  }
+
   inline void getVariableString(list<oVariableString> &var) const
     {oDC->getVariableString(oB, var);}
 
@@ -399,6 +442,14 @@ public:
 
   inline int getInt(const string &name) const {
     return oDC->getInt(Data, name.c_str());
+  }
+
+  inline double getDouble(const char* Name) const {
+    return oDC->getDouble(Data, Name);
+  }
+
+  inline double getDouble(const string& name) const {
+    return oDC->getDouble(Data, name.c_str());
   }
 
   inline __int64 getInt64(const char *Name) const

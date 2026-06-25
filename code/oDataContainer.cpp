@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -87,14 +87,29 @@ oDataInfo &oDataContainer::addVariableInt(const char *name,
 }
 
 oDataInfo &oDataContainer::addVariableDecimal(const char *name, const char *descr, int fixedDeci) {
-  oDataInfo &odi = addVariableInt(name, oISDecimal, descr);
+  oDataInfo odi;
+  odi.Index = dataPointer;
+  strcpy_s(odi.Name, name);
+  strcpy_s(odi.Description, descr);
+  odi.Size = sizeof(double);
+  odi.Type = oDTDouble;
+  odi.SubType = 0;
+
   odi.decimalSize = fixedDeci;
   int &s = odi.decimalScale;
   s = 1;
   for (int k = 0; k < fixedDeci; k++)
     s*=10;
 
-  return odi;
+  if (dataPointer % 8 != 0)
+    dataPointer += (8 - dataPointer % 8);
+
+  if (dataPointer + odi.Size <= dataMaxSize) {
+    dataPointer += odi.Size;
+    return addVariable(odi);
+  }
+  else
+    throw std::exception("oDataContainer: Out of bounds.");
 }
 
 oDataInfo &oDataContainer::addVariableString(const char *name, const char *descr, const shared_ptr<oDataDefiner> &dataDef) {
@@ -270,6 +285,23 @@ bool oDataContainer::setInt64(void *data, const char *Name, __int64 V)
   else return false;//Not modified
 }
 
+bool oDataContainer::setDouble(oBase* ob, void* data, const char* name, double value) {
+  const oDataInfo* odi = findVariable(name);
+
+  if (!odi)
+    throw std::exception("oDataContainer: Variable not found.");
+
+  if (odi->Type != oDTDouble)
+    throw std::exception("oDataContainer: Variable of wrong type.");
+
+  LPBYTE vd = LPBYTE(data) + odi->Index;
+  if (*((double*)vd) != value) {
+    *((double*)vd) = value;
+    return true;
+  }
+  else return false;//Not modified
+}
+
 int oDataContainer::getInt(const void *data, const char *Name) const
 {
   const oDataInfo *odi=findVariable(Name);
@@ -306,6 +338,19 @@ __int64 oDataContainer::getInt64(const void *data, const char *Name) const
     return tmp;
   }
 }
+
+double oDataContainer::getDouble(const void* data, const char* name) const {
+  const oDataInfo* odi = findVariable(name);
+
+  if (!odi)
+    throw std::exception("oDataContainer: Variable not found.");
+
+  if (odi->Type != oDTDouble)
+    throw std::exception("oDataContainer: Variable of wrong type.");
+
+  LPBYTE vd = LPBYTE(data) + odi->Index;
+  return *((double*)vd);
+ }
 
 bool oDataContainer::setString(oBase *ob, const char *name, const wstring &v) {
   oDataInfo *odi=findVariable(name);
@@ -469,16 +514,16 @@ int oDataContainer::getYear(const void* data, const char *name) const {
   }
 }
 
-bool oDataContainer::write(const oBase *ob, xmlparser &xml) const {
-  void *data, *oldData;
-  vector< vector<wstring> > *strptr;
+bool oDataContainer::write(const oBase* ob, xmlparser& xml) const {
+  void* data, * oldData;
+  vector< vector<wstring> >* strptr;
   ob->getDataBuffers(data, oldData, strptr);
   xml.startTag("oData");
 
   for (size_t kk = 0; kk < ordered.size(); kk++) {
-    const oDataInfo &di=ordered[kk];
-    if (di.Type==oDTInt){
-      LPBYTE vd=LPBYTE(data)+di.Index;
+    const oDataInfo& di = ordered[kk];
+    if (di.Type == oDTInt) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
       if (di.SubType == oISTime || di.SubType == oISTimeAdjust) {
         int nr;
         memcpy(&nr, vd, sizeof(int));
@@ -506,13 +551,22 @@ bool oDataContainer::write(const oBase *ob, xmlparser &xml) const {
         xml.write64(di.Name, nr);
       }
     }
-    else if (di.Type == oDTString){
-      LPBYTE vd=LPBYTE(data)+di.Index;
+    else if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      char bf[64];
+      double num = *(double*)vd;
+      if (!xml.skipDefault() || !(num == 0.0)) {
+        formatDouble(num, bf, true);
+        xml.write(di.Name, bf);
+      }
+    }
+    else if (di.Type == oDTString) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
       wstring out = (wchar_t*)vd;
       xml.write(di.Name, out);
     }
     else if (di.Type == oDTStringDynamic) {
-      const wstring &str = (*strptr)[0][di.Index];
+      const wstring& str = (*strptr)[0][di.Index];
       xml.write(di.Name, str);
     }
   }
@@ -522,9 +576,9 @@ bool oDataContainer::write(const oBase *ob, xmlparser &xml) const {
   return true;
 }
 
-void oDataContainer::set(oBase *ob, const xmlobject &xo) {
-  void *data, *oldData;
-  vector< vector<wstring> > *strptr;
+void oDataContainer::set(oBase* ob, const xmlobject& xo) {
+  void* data, * oldData;
+  vector< vector<wstring> >* strptr;
   ob->getDataBuffers(data, oldData, strptr);
 
   xmlList xl;
@@ -532,15 +586,15 @@ void oDataContainer::set(oBase *ob, const xmlobject &xo) {
 
   xmlList::const_iterator it;
 
-  for(it=xl.begin(); it != xl.end(); ++it){
+  for (it = xl.begin(); it != xl.end(); ++it) {
 
-    oDataInfo *odi=findVariable(it->getName());
+    oDataInfo* odi = findVariable(it->getName());
 
     if (odi) {
-      if (odi->Type == oDTInt){
-        LPBYTE vd=LPBYTE(data)+odi->Index;
+      if (odi->Type == oDTInt) {
+        LPBYTE vd = LPBYTE(data) + odi->Index;
         if (odi->SubType == oISTime || odi->SubType == oISTimeAdjust)
-          *((int *)vd) = it->getRelativeTime();
+          *((int*)vd) = it->getRelativeTime();
         else if (odi->SubType == oISDateOrYear) {
           int val = convertDateYMD(it->getStr(), true);
           if (val > 0)
@@ -549,18 +603,28 @@ void oDataContainer::set(oBase *ob, const xmlobject &xo) {
             *((int*)vd) = it->getInt();
         }
         else if (odi->SubType != oIS64)
-          *((int *)vd) = it->getInt();
+          *((int*)vd) = it->getInt();
         else
-          *((__int64 *)vd) = it->getInt64();
+          *((__int64*)vd) = it->getInt64();
+      }
+      else if (odi->Type == oDTDouble) {  
+        LPBYTE vd = LPBYTE(data) + odi->Index;
+        if (strchr(it->getRawPtr(), '.'))
+          *((double*)vd) = it->getDouble();
+        else {
+          // <= MeOS 4.1
+          int fixed = it->getInt();
+          *((double*)vd) = double(fixed) / double(odi->decimalScale);
+        }
       }
       else if (odi->Type == oDTString) {
-        LPBYTE vd=LPBYTE(data)+odi->Index;
+        LPBYTE vd = LPBYTE(data) + odi->Index;
         const wchar_t* ptr = it->getWPtr();
         if (ptr)
-          wcsncpy_s((wchar_t *)vd, odi->Size/sizeof(wchar_t), ptr, (odi->Size-1)/sizeof(wchar_t));
+          wcsncpy_s((wchar_t*)vd, odi->Size / sizeof(wchar_t), ptr, (odi->Size - 1) / sizeof(wchar_t));
       }
       else if (odi->Type == oDTStringDynamic) {
-        wstring &str = (*strptr)[0][odi->Index];
+        wstring& str = (*strptr)[0][odi->Index];
         str = it->getWStr();
       }
     }
@@ -593,13 +657,24 @@ vector<InputInfo *> oDataContainer::buildDataFields(gdioutput &gdi, const vector
     string Id=di.Name+string("_odc");
 
     if (di.Type==oDTInt){
-      if (di.SubType == oISDate || di.SubType == oISTime || di.SubType == oISTimeAdjust || di.SubType == oISDateOrYear)
+      if (!di.fixedSet.empty()) {
+        gdi.addSelection(Id, 70, 100, nullptr, gdi.widen(di.Description) + L":");
+        auto fs = di.fixedSet;
+        for (auto& [desc, key] : fs)
+          desc = lang.tl(desc);
+        
+        gdi.setItems(Id, fs);
+      }
+      else if (di.SubType == oISDate || di.SubType == oISTime || di.SubType == oISTimeAdjust || di.SubType == oISDateOrYear)
         out.push_back(&gdi.addInput(Id, L"", 10, 0, gdi.widen(di.Description) + L":"));
       else
         out.push_back(&gdi.addInput(Id, L"", 6, 0, gdi.widen(di.Description) + L":"));
     }
+    else if (di.Type == oDTDouble) {
+      out.push_back(&gdi.addInput(Id, L"", 10, 0, gdi.widen(di.Description) + L":"));
+    }
     else if (di.Type==oDTString){
-      out.push_back(&gdi.addInput(Id, L"", min(di.Size+2, maxFieldSize), 0, gdi.widen(di.Description) + L":"));
+      out.push_back(&gdi.addInput(Id, L"", min(di.Size+2, maxFieldSize), 0, gdi.widen(di.Description) + L":").limitText(di.Size));
     }
     else if (di.Type==oDTStringDynamic){
       out.push_back(&gdi.addInput(Id, L"", maxFieldSize, 0, gdi.widen(di.Description) + L":"));
@@ -620,11 +695,17 @@ int oDataContainer::getDataAmountMeasure(const void *data) const
       if (nr != 0)
         amount++;
     }
+    if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      double nr;
+      memcpy(&nr, vd, sizeof(double));
+      if (nr != 0.0)
+        amount++;
+    }
     else if (di.Type==oDTString) {
       LPBYTE vd=LPBYTE(data)+di.Index;
       amount += strlen((char *)vd);
     }
-
   }
   return amount;
 }
@@ -648,12 +729,19 @@ void oDataContainer::fillDataFields(const oBase *ob, gdioutput &gdi) const
         if (di.SubType == oISCurrency) {
           if (strcmp(di.Name, "CardFee") == 0 && nr == -1)
             nr = 0; //XXX CardFee hack. CardFee = 0 is coded as -1
-          gdi.setText(Id.c_str(), ob->getEvent()->formatCurrency(nr));
+          gdi.setText(Id, ob->getEvent()->formatCurrency(nr));
+        }
+        else if (!di.fixedSet.empty()) {
+          if (find_if(di.fixedSet.begin(), di.fixedSet.end(),
+               [&nr](const auto& arg) {return arg.second == nr;}) != di.fixedSet.end())
+            gdi.selectItemByData(Id, nr);
+          else
+            gdi.selectItemByData(Id, di.fixedSet.begin()->second);
         }
         else {
           wchar_t bf[64];
           formatNumber(nr, di, bf);
-          gdi.setText(Id.c_str(), bf);
+          gdi.setText(Id, bf);
         }
       }
       else {
@@ -663,6 +751,14 @@ void oDataContainer::fillDataFields(const oBase *ob, gdioutput &gdi) const
         oBase::converExtIdentifierString(nr, bf);
         gdi.setText(Id.c_str(), bf);
       }
+    }
+    else if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      double nr;
+      memcpy(&nr, vd, sizeof(double));
+      wchar_t bf[64];
+      formatDouble(nr, bf, false);
+      gdi.setText(Id.c_str(), bf);
     }
     else if (di.Type==oDTString){
       LPBYTE vd=LPBYTE(data)+di.Index;
@@ -675,45 +771,45 @@ void oDataContainer::fillDataFields(const oBase *ob, gdioutput &gdi) const
   }
 }
 
-bool oDataContainer::saveDataFields(oBase *ob, gdioutput &gdi, std::set<string> &modified) {
-  void *data, *oldData;
-  vector<vector<wstring>> *strptr;
+bool oDataContainer::saveDataFields(oBase* ob, gdioutput& gdi, std::set<string>& modified) {
+  void* data, * oldData;
+  vector<vector<wstring>>* strptr;
   ob->getDataBuffers(data, oldData, strptr);
 
   for (size_t kk = 0; kk < ordered.size(); kk++) {
-    const oDataInfo &di=ordered[kk];
+    const oDataInfo& di = ordered[kk];
 
-    string Id=di.Name+string("_odc");
+    string Id = di.Name + string("_odc");
 
     if (!gdi.hasWidget(Id)) {
       continue;
     }
-    if (di.Type==oDTInt){
+    if (di.Type == oDTInt) {
       int no = 0;
       if (di.SubType == oISCurrency) {
-        no = ob->getEvent()->interpretCurrency(gdi.getText(Id.c_str()));
+        no = ob->getEvent()->interpretCurrency(gdi.getText(Id));
       }
       else if (di.SubType == oISDate) {
-        no = convertDateYMD(gdi.getText(Id.c_str()), true);
+        no = convertDateYMD(gdi.getText(Id), true);
         if (no <= 0)
           no = 0;
       }
       else if (di.SubType == oISDateOrYear) {
-        no = convertDateYMD(gdi.getText(Id.c_str()), true);
+        no = convertDateYMD(gdi.getText(Id), true);
         if (no <= 0) {
-          no = gdi.getTextNo(Id.c_str());
+          no = gdi.getTextNo(Id);
           if (no < 1900 || no > 9999)
             no = 0;
         }
       }
       else if (di.SubType == oISTime) {
-        no = convertAbsoluteTimeHMS(gdi.getText(Id.c_str()), -1);
+        no = convertAbsoluteTimeHMS(gdi.getText(Id), -1);
       }
       else if (di.SubType == oISTimeAdjust) {
-        no = convertAbsoluteTimeMS(gdi.getText(Id.c_str()));
+        no = convertAbsoluteTimeMS(gdi.getText(Id));
       }
       else if (di.SubType == oISDecimal) {
-        wstring str = gdi.getText(Id.c_str());
+        wstring str = gdi.getText(Id);
         for (size_t k = 0; k < str.length(); k++) {
           if (str[k] == ',') {
             str[k] = '.';
@@ -723,31 +819,56 @@ bool oDataContainer::saveDataFields(oBase *ob, gdioutput &gdi, std::set<string> 
         double val = _wtof(str.c_str());
         no = int(di.decimalScale * val);
       }
+      else if (!di.fixedSet.empty()) {
+        auto res = gdi.getSelectedItem(Id);
+        if (res.second)
+          no = res.first;
+        else
+          no = (int)di.fixedSet.begin()->second;
+      }
       else {
-        no = gdi.getTextNo(Id.c_str());
+        no = gdi.getTextNo(Id);
       }
 
-      LPBYTE vd=LPBYTE(data)+di.Index;
-      int oldNo = *((int *)vd);
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      int oldNo = *((int*)vd);
       if (oldNo != no) {
-        *((int *)vd)=no;
+        *((int*)vd) = no;
+        ob->updateChanged();
+        modified.insert(di.Name);
+      }
+    }
+    else if (di.Type == oDTDouble) {
+      wstring str = gdi.getText(Id);
+      for (size_t k = 0; k < str.length(); k++) {
+        if (str[k] == ',') {
+          str[k] = '.';
+          break;
+        }
+      }
+      double no = _wtof(str.c_str());
+
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      double oldV = *((double*)vd);
+      if (std::abs(oldV - no) > 1e-14 * std::max(std::abs(oldV), std::abs(no))) {
+        memcpy(vd, &no, sizeof(double));
         ob->updateChanged();
         modified.insert(di.Name);
       }
     }
     else if (di.Type == oDTString) {
-      LPBYTE vd=LPBYTE(data)+di.Index;
-      wstring oldS = (wchar_t *)vd;
-      wstring newS = gdi.getText(Id.c_str());
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      wstring oldS = (wchar_t*)vd;
+      wstring newS = gdi.getText(Id);
       if (oldS != newS) {
-        wcsncpy_s((wchar_t *)vd, di.Size/sizeof(wchar_t), newS.c_str(), (di.Size-1)/sizeof(wchar_t));
+        wcsncpy_s((wchar_t*)vd, di.Size / sizeof(wchar_t), newS.c_str(), (di.Size - 1) / sizeof(wchar_t));
         ob->updateChanged();
         modified.insert(di.Name);
       }
     }
     else if (di.Type == oDTStringDynamic) {
-      wstring &oldS = (*strptr)[0][di.Index];
-      wstring newS = gdi.getText(Id.c_str());
+      wstring& oldS = (*strptr)[0][di.Index];
+      wstring newS = gdi.getText(Id);
       if (oldS != newS) {
         oldS = newS;
         modified.insert(di.Name);
@@ -755,7 +876,6 @@ bool oDataContainer::saveDataFields(oBase *ob, gdioutput &gdi, std::set<string> 
       }
     }
   }
-
   return true;
 }
 
@@ -767,6 +887,11 @@ string oDataContainer::C_INT64(const string &name)
 string oDataContainer::C_INT(const string &name)
 {
   return " `"+name+"` INT NOT NULL DEFAULT 0, ";
+}
+
+string oDataContainer::C_DOUBLE(const string& name)
+{
+  return " `" + name + "` DOUBLE NOT NULL DEFAULT 0.0, ";
 }
 
 string oDataContainer::C_SMALLINT(const string &name)
@@ -846,37 +971,39 @@ string oDataContainer::SQL_quote(const wchar_t *in)
   }
 }
 
-string oDataContainer::generateSQLDefinition(const std::set<string> &exclude) const {
+string oDataContainer::generateSQLDefinition(const std::set<string>& exclude) const {
   string sql;
   bool addSyntx = !exclude.empty();
 
   for (size_t k = 0; k < ordered.size(); k++) {
     if (exclude.count(ordered[k].Name) == 0) {
       if (addSyntx)
-         sql += "ADD COLUMN ";
+        sql += "ADD COLUMN ";
 
-      const oDataInfo &di = ordered[k];
+      const oDataInfo& di = ordered[k];
       string name = di.Name;
-      if (di.Type==oDTInt){
-        if (di.SubType==oIS32 || di.SubType==oISDate || di.SubType==oISCurrency ||
-           di.SubType==oISTime  || di.SubType == oISTimeAdjust || di.SubType==oISDecimal || di.SubType == oISDateOrYear)
-          sql+=C_INT(name);
-        else if (di.SubType==oIS16)
-          sql+=C_SMALLINT(name);
-        else if (di.SubType==oIS8)
-          sql+=C_TINYINT(name);
-        else if (di.SubType==oIS64)
-          sql+=C_INT64(name);
-        else if (di.SubType==oIS16U)
-          sql+=C_SMALLINTU(name);
-        else if (di.SubType==oIS8U)
-          sql+=C_TINYINTU(name);
+      if (di.Type == oDTInt) {
+        if (di.SubType == oIS32 || di.SubType == oISDate || di.SubType == oISCurrency ||
+          di.SubType == oISTime || di.SubType == oISTimeAdjust || di.SubType == oISDecimal || di.SubType == oISDateOrYear)
+          sql += C_INT(name);
+        else if (di.SubType == oIS16)
+          sql += C_SMALLINT(name);
+        else if (di.SubType == oIS8)
+          sql += C_TINYINT(name);
+        else if (di.SubType == oIS64)
+          sql += C_INT64(name);
+        else if (di.SubType == oIS16U)
+          sql += C_SMALLINTU(name);
+        else if (di.SubType == oIS8U)
+          sql += C_TINYINTU(name);
       }
-      else if (di.Type==oDTString){
-        sql+=C_STRING(name, di.Size-1);
+      else if (di.Type == oDTDouble)
+        sql += C_DOUBLE(name);
+      else if (di.Type == oDTString) {
+        sql += C_STRING(name, di.Size - 1);
       }
-      else if (di.Type==oDTStringDynamic || di.Type==oDTStringArray){
-        sql+=C_STRING(name, -1);
+      else if (di.Type == oDTStringDynamic || di.Type == oDTStringArray) {
+        sql += C_STRING(name, -1);
       }
     }
   }
@@ -901,6 +1028,11 @@ bool oDataContainer::isModified(const oDataInfo &di,
     else {
       return memcmp(vd, vdOld, 8) != 0;
     }
+  }
+  else if (di.Type == oDTDouble) {
+    LPBYTE vd = LPBYTE(data) + di.Index;
+    LPBYTE vdOld = LPBYTE(oldData) + di.Index;
+    return memcmp(vd, vdOld, 8) != 0; 
   }
   else if (di.Type == oDTString) {
     LPBYTE vdB = LPBYTE(data) + di.Index;
@@ -994,6 +1126,13 @@ string oDataContainer::generateSQLSet(const oBase *ob, bool forceSetAll) const {
         sql+=bf;
       }
     }
+    else if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      char tmp[64];
+      formatDouble(*(double*)vd, tmp, false);
+      sprintf_s(bf, alloc, ", `%s`=%s", di.Name, tmp);
+      sql += bf;
+    }
     else if (di.Type==oDTString) {
       LPBYTE vd=LPBYTE(data)+di.Index;
       sprintf_s(bf, alloc, ", `%s`='%s'", di.Name, SQL_quote((wchar_t *)vd).c_str());
@@ -1054,6 +1193,10 @@ bool oDataContainer::merge(oBase &destination, const oBase &source, const oBase 
           modified = true;
       }
     }
+    else if (di.Type == oDTDouble) {
+      if (setData(destdata, srcdata, basedata, di.Index, sizeof(double)))
+        modified = true;
+    }
     else if (di.Type == oDTString) {
       if (setData(destdata, srcdata, basedata, di.Index, di.Size))
         modified = true;
@@ -1093,21 +1236,36 @@ void oDataContainer::getVariableInt(const void *data,
     if (di.Type == oDTInt) {
       LPBYTE vd=LPBYTE(data)+di.Index;
 
-      oVariableInt vi;
+      var.emplace_back();
+      oVariableInt &vi = var.back();
       memcpy(vi.name, di.Name, sizeof(vi.name));
       if (di.SubType != oIS64)
         vi.data32 = (int *)vd;
       else
         vi.data64 = (__int64 *)vd;
-      var.push_back(vi);
     }
   }
 }
 
+void oDataContainer::getVariableDouble(const void* data,
+                                       list<oVariableDouble>& var) const {
+  var.clear();
+  for (size_t kk = 0; kk < ordered.size(); kk++) {
+    const oDataInfo& di = ordered[kk];
+
+    if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+
+      var.emplace_back();
+      auto &v = var.back();
+      memcpy(v.name, di.Name, sizeof(v.name));
+      v.data = (double*)vd;
+    }
+  }
+}
 
 void oDataContainer::getVariableString(const oBase *ob,
-                                       list<oVariableString> &var) const
-{
+                                       list<oVariableString> &var) const {
   void *data, *oldData;
   vector< vector<wstring> > *strptr;
   ob->getDataBuffers(data, oldData, strptr);
@@ -1120,19 +1278,19 @@ void oDataContainer::getVariableString(const oBase *ob,
     if (di.Type == oDTString){
       LPBYTE vd=(LPBYTE)(data)+di.Index;
 
-      oVariableString vs((wchar_t *)vd, di.Size);
+      var.emplace_back((wchar_t *)vd, di.Size);
+      auto& vs = var.back();
       memcpy(vs.name, di.Name, sizeof(vs.name));
-      var.push_back(vs);
     }
     else if (di.Type == oDTStringDynamic) {
-      oVariableString vs((*strptr)[0], di.Index);
+      var.emplace_back((*strptr)[0], di.Index);
+      auto& vs = var.back();
       memcpy(vs.name, di.Name, sizeof(vs.name));
-      var.push_back(vs);
     }
     else if (di.Type == oDTStringArray) {
-      oVariableString vs((*strptr)[di.Index]);
+      var.emplace_back((*strptr)[di.Index]);
+      auto& vs = var.back();
       memcpy(vs.name, di.Name, sizeof(vs.name));
-      var.push_back(vs);
     }
   }
 }
@@ -1181,9 +1339,9 @@ void oDataContainer::buildTableCol(Table *table)
   for (size_t kk = 0; kk < ordered.size(); kk++) {
     oDataInfo &di=ordered[kk];
 
-    if (di.dataDefiner)  {
+    if (di.dataDefiner) {
       table->addDataDefiner(di.Name, di.dataDefiner.get());
-      int w = strlen(di.Description)*6;
+      int w = strlen(di.Description) * 6;
       di.tableIndex = di.dataDefiner->addTableColumn(table, di.Description, w);
     }
     else if (di.Type == oDTInt) {
@@ -1191,12 +1349,17 @@ void oDataContainer::buildTableCol(Table *table)
       bool numeric = di.SubType != oISDate && di.SubType != oISTime && di.SubType != oISTimeAdjust && di.SubType != oISDateOrYear;
       int w;
       if (di.SubType == oISDecimal)
-        w = max( (di.decimalSize+4)*10, 70);
+        w = max((di.decimalSize + 4) * 10, 70);
       else
         w = 70;
 
-      w = max(int(strlen(di.Description))*6, w);
+      w = max(int(strlen(di.Description)) * 6, w);
       di.tableIndex = table->addColumn(di.Description, w, numeric, right);
+    }
+    else if (di.Type == oDTDouble) {
+      int w = 130;
+      w = max(int(strlen(di.Description)) * 6, w);
+      di.tableIndex = table->addColumn(di.Description, w, true, true);
     }
     else if (di.Type == oDTString) {
       int w = max(max(di.Size+1, int(strlen(di.Description)))*6, 70);
@@ -1216,6 +1379,117 @@ void oDataContainer::buildTableCol(Table *table)
       di.tableIndex = table->addColumn(di.Description, w, false);
     }
   }
+}
+
+template<typename CH>
+void eraseTrail(CH* bf, bool keepDecimalPoint, int last) {
+  int expPart = -1;
+  for (int i = 0; i < last; i++) {
+    if (bf[i] == 'e') {
+      expPart = i;
+      last = i;
+      break;
+    }
+  }
+
+  if (last > 12 && bf[last - 1] != '.' && bf[last - 1] != '0' && bf[last - 1] != '9' && (bf[last - 2] == '0' || bf[last - 2] == '9')) {
+    bf[last - 1] = bf[last - 2];
+  }
+
+  bool trailed = false;
+
+  if (last > 1) {
+    if (bf[last - 1] == '0') {
+      // Simplify decimal form
+      while (last > 1) {
+        if (bf[last - 1] == '0') {
+          bf[--last] = 0;
+          trailed = true;
+        }
+        else if (!keepDecimalPoint && bf[last - 1] == '.') {
+          bf[--last] = 0;
+          break;
+        }
+        else
+          break;
+      }
+    }
+    else if (bf[last - 1] == '9') {
+      // Simplify decimal form
+
+      CH fill = 0;
+      int endP = -1;
+      bool didRound = false;
+      while (last > 0) {
+        if (bf[last - 1] == '9') {
+          bf[--last] = fill;
+          trailed = true;
+        }
+        else if (bf[last - 1] == '.') {
+          last--;
+          if (!keepDecimalPoint) 
+            bf[last] = 0;
+          endP = last;
+          fill = '0'; // Reach integer part. Round up
+        }
+        else if (bf[last - 1] == '-') {
+          last = 1;
+          break;
+        }
+        else {
+          assert(bf[last - 1] >= '0' && bf[last - 1] <= '8');
+          ++bf[last - 1]; // Round up
+          didRound = true;
+          break;
+        }
+      }
+
+      if (last <= 1 && !didRound) {
+        // 999 -> 1000 etc
+        assert(endP != -1);
+        for (int i = 0; i < endP; i++) {
+          bf[endP + 1 - i] = bf[endP - i];
+        }
+        endP++;
+        bf[last] = '1';
+      }
+      if (endP != -1)
+        last = endP;
+    }
+  }
+
+  if (expPart != -1 && trailed) {
+    while (bf[expPart]) {
+      bf[last++] = bf[expPart++];
+    }
+    bf[last++] = 0;
+  }
+}
+
+void oDataContainer::formatDouble(double nr, wchar_t bf[64], bool keepDecimalPoint) {
+  int last;
+  if (nr > 1e7 || nr < -1e7)
+    last = swprintf_s(bf, 64, L"%#.16e", nr);
+  else
+    last = swprintf_s(bf, 64, L"%#.16g", nr);
+  eraseTrail(bf, keepDecimalPoint, last);
+  return;
+}
+
+void oDataContainer::formatDouble(double nr, char bf[64], bool keepDecimalPoint) {
+  int last;
+  if (nr > 1e7 || nr < -1e7)
+    last = sprintf_s(bf, 64, "%#.16e", nr);
+  else
+    last = sprintf_s(bf, 64, "%#.16g", nr);
+  eraseTrail(bf, keepDecimalPoint, last);
+  return;
+}
+
+string oDataContainer::formatDouble(double d) {
+  char bf[64];
+  formatDouble(d, bf, false);
+  return bf;
 }
 
 bool oDataContainer::formatNumber(int nr, const oDataInfo &di, wchar_t bf[64]) const {
@@ -1356,6 +1630,13 @@ int oDataContainer::fillTableCol(const oBase &owner, Table &table, bool canEdit)
         oBase::converExtIdentifierString(nr, bf);
         table.set(di.tableIndex[0], ob, 1000 + di.tableIndex[0], bf, canEdit);
       }
+    }
+    else if (di.Type == oDTDouble) {
+      LPBYTE vd = LPBYTE(data) + di.Index;
+      double nr;
+      memcpy(&nr, vd, sizeof(double));
+      formatDouble(nr, bf, false);
+      table.set(di.tableIndex[0], ob, 1000 + di.tableIndex[0], bf, canEdit);
     }
     else if (di.Type==oDTString) {
       LPBYTE vd=LPBYTE(data)+di.Index;
@@ -1504,6 +1785,37 @@ pair<int, bool>  oDataContainer::inputData(oBase *ob, int id,
         }
 
         formatNumber(outN, di, bf);
+        output = bf;
+      }
+      else if (di.Type == oDTDouble) {
+        LPBYTE vd = LPBYTE(data) + di.Index;
+        wstring str = input;
+        for (size_t k = 0; k < str.length(); k++) {
+          if (str[k] == ',') {
+            str[k] = '.';
+            break;
+          }
+        }
+        double no = _wtof(str.c_str());
+
+        double oldV;
+        memcpy(&oldV, vd, sizeof(double));
+        memcpy(vd, &no, sizeof(double));
+        wchar_t bf[128];
+        double outN = no;
+
+        if (std::abs(oldV - no) > 1e-14 * std::max(std::abs(oldV), std::abs(no))) {
+          ob->updateChanged();
+          if (noUpdate == false)
+            ob->synchronize(true);
+
+          memcpy(&outN, vd, sizeof(double));
+
+          if (di.dataNotifier)
+            di.dataNotifier->notify(ob, oldV, no); // Implement double version?
+        }
+
+        formatDouble(outN, bf, false);
         output = bf;
       }
       else if (di.Type == oDTString) {

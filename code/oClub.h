@@ -5,7 +5,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,8 +26,8 @@
 ************************************************************************/
 
 #include <map>
-#include "xmlparser.h"
 #include "oBase.h"
+
 class oEvent;
 
 class oClub;
@@ -40,6 +40,8 @@ typedef oClub* pClub;
 class oDataInterface;
 class oDataConstInterface;
 class Table;
+class xmlparser;
+class xmlobject;
 
 class oClub : public oBase {
 protected:
@@ -174,7 +176,16 @@ public:
                        map<int, int> &paidPerMode);
 
   wstring getInfo() const;
-  bool sameClub(const oClub &c);
+  
+  // Check same name
+  bool sameClub(const oClub &c) const;
+
+  // True of the club has an adress
+  bool isBillable() const;
+
+  // Return number of stored data field (address, phone, mail etc) 
+  // Use to determine which version is best in case of duplicated club data etc
+  int getDataAmount() const;
 
   const wstring &getName() const {return name;}
 

@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -1771,7 +1771,7 @@ bool SportIdent::getCard9Data(BYTE *data, SICard &card)
 
   if (series == 1) {
     // SI Card 9
-    card.nPunch=min(int(data[22]), 50);
+    card.nPunch = min(int(data[22]), 50);
     for(unsigned k=0;k<card.nPunch;k++) {
       analysePunch(14*4 + data + 4*k, card.Punch[k].Time, card.Punch[k].Code, false);
     }
@@ -1934,7 +1934,8 @@ bool SportIdent::analysePunch(BYTE *data, DWORD &time, DWORD &control, bool subS
     else {
       control = 0;
       uint8_t tss = data[1]; // Sub second 1/256 seconds
-      int tenth = (((100 * tss) / 256) + 4) / 10;
+      assert(timeConstSecond == 10 || timeConstSecond==100);
+      int tenth = (((100 * tss) / 256) + 4) / (100/timeConstSecond);
       time += tenth;
     }
     return true;

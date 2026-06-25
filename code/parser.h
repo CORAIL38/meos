@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -100,11 +100,12 @@ class Parser {
     string desc;
     bool isVector;
     bool isMatrix;
-    vector< vector<int> > value;
+    bool deprecated = false;
+    vector<vector<int>> value;
   };
 
   map<string, Symbol> symb;
-  mutable map<string, vector<int> > var;
+  mutable map<string, vector<int>> var;
 
   mutable int breakMode;
   mutable bool returnMode;
@@ -117,8 +118,8 @@ class Parser {
     ParseNode *node;
     StatementNode *next;
 
-    StatementNode(const StatementNode &); //Do not use
-    StatementNode &operator=(const StatementNode &); //Do not use
+    StatementNode(const StatementNode&) = delete;
+    StatementNode &operator=(const StatementNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -130,8 +131,8 @@ class Parser {
 
   class ValueNode : public ParseNode {
     string value;
-    ValueNode(const ValueNode &); //Do not use
-    ValueNode &operator=(const ValueNode &); //Do not use
+    ValueNode(const ValueNode&) = delete;
+    ValueNode &operator=(const ValueNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -148,8 +149,8 @@ class Parser {
     string expr;
     ParseNode *index;
     ParseNode *index2;    
-    ArrayValueNode(const ArrayValueNode &); //Do not use
-    ArrayValueNode &operator=(const ArrayValueNode &); //Do not use
+    ArrayValueNode(const ArrayValueNode&) = delete;
+    ArrayValueNode& operator=(const ArrayValueNode&) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -167,8 +168,8 @@ class Parser {
   class UnaryOperatorNode : public ParseNode {
     Operator op;
     ParseNode *right;
-    UnaryOperatorNode(const UnaryOperatorNode &); //Do not use
-    UnaryOperatorNode &operator=(const UnaryOperatorNode &); //Do not use
+    UnaryOperatorNode(const UnaryOperatorNode&) = delete;
+    UnaryOperatorNode &operator=(const UnaryOperatorNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -182,8 +183,8 @@ class Parser {
     Operator op;
     ParseNode *left;
     ParseNode *right;
-    BinaryOperatorNode(const BinaryOperatorNode &); //Do not use
-    BinaryOperatorNode &operator=(const BinaryOperatorNode &); //Do not use
+    BinaryOperatorNode(const BinaryOperatorNode &) = delete;
+    BinaryOperatorNode &operator=(const BinaryOperatorNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -197,8 +198,8 @@ class Parser {
     ParseNode *condition;
     ParseNode *iftrue;
     ParseNode *iffalse;
-    IfNode(const IfNode &); //Do not use
-    IfNode &operator=(const IfNode &); //Do not use
+    IfNode(const IfNode &) = delete;
+    IfNode &operator=(const IfNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -211,8 +212,8 @@ class Parser {
   class WhileNode : public ParseNode {
     ParseNode *condition;
     ParseNode *body;
-    WhileNode(const WhileNode &); //Do not use
-    WhileNode &operator=(const WhileNode &); //Do not use
+    WhileNode(const WhileNode &) = delete; 
+    WhileNode &operator=(const WhileNode &) = delete;
 
   public:
     int evaluate(const Parser &parser) const;
@@ -286,7 +287,7 @@ public:
   void addSymbol(const char *name, const vector<int> &value);
   void addSymbol(const char *name, vector< vector<int> > &value);
   void removeSymbol(const char *name);
-  void declareSymbol(const char *name, const string &desc, bool isVector, bool isMatrix = false);
+  void declareSymbol(const char *name, const string &desc, bool isVector, bool isMatrix = false, bool deprecated = false);
   void clearSymbols();
   void clearVariables() const;
 

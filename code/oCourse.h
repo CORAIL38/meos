@@ -6,7 +6,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -40,19 +40,18 @@ class oDataInterface;
 
 struct SICard;
 
-const int NControlsMax = 128;
-
 class oCourse : public oBase
 {
 private:
   // Return 1000 on no match. Lower return value means better match
   static int matchLoopKey(const vector<int> &punches, const vector<pControl> &key);
 protected:
-  pControl Controls[NControlsMax];
+  vector<pControl> controls;
+  wstring name;
+  int length = 0;
+  pControl start = nullptr;
+  pControl finish = nullptr;
 
-  int nControls;
-  wstring Name;
-  int Length;
   static const int dataSize = 128;
   int getDISize() const final {return dataSize;}
 
@@ -128,7 +127,9 @@ public:
 
   int getNumLoops() const;
 
-  bool operator<(const oCourse &b) const {return Name<b.Name;}
+  bool operator<(const oCourse &b) const {
+    return name<b.name;
+  }
 
   void setNumberMaps(int nm);
   int getNumberMaps() const;
@@ -163,7 +164,9 @@ public:
   /// Check if course has problems
   wstring getCourseProblems() const;
 
-  int getNumControls() const {return nControls;}
+  int nControls() const { return controls.size(); }
+  int getNumControls() const { return controls.size(); }
+
   void setLegLengths(const vector<int> &legLengths);
 
   // Get/set the minimal number of rogaining points to pass
@@ -205,7 +208,6 @@ public:
   int distance(const oCard &card) const;
   int distance(int *punches, int numPunches) const;
 
-
   bool fillCourse(gdioutput &gdi, const string &name);
 
   /** Returns true if changed. */
@@ -231,19 +233,28 @@ public:
 
   int getBestTime() const;
 
-  const wstring &getName() const {return Name;}
+  const wstring &getName() const {return name;}
   
   /** Split the name (family:name) into family and name*/
   void getNameAndFamily(wstring& name, wstring& family) const;
   
-  int getLength() const {return Length;}
+  int getLength() const {return length;}
   wstring getLengthS() const;
+
+  int getClimb() const;
+  bool setClimb(int climb);
 
   void setName(const wstring &n);
   void setLength(int len);
 
-  wstring getStart() const;
+  const wstring &getStart() const;
   void setStart(const wstring &start, bool sync);
+
+  bool setStartFinish(pControl startC, pControl finishC, bool updateStatus = true);
+  bool setStartFinishId(int startCId, int finishCId, bool updateStatus = true);
+
+  int getStartId() const { return start ? start->getId() : 0; }
+  int getFinishId() const { return finish ? finish->getId() : 0; }
 
   void merge(const oBase &input, const oBase *base) final;
 

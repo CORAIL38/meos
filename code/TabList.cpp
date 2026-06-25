@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -54,7 +54,11 @@ constexpr static int NUMTEXTSAMPLE = 13;
 
 constexpr static int ForcePageBreak = 1024;
 constexpr static int IgnoreLimitPer = 512;
+
+constexpr static int AddPatrolRogaining = 6;
 constexpr static int AddTeamRogaining = 5;
+constexpr static int AddPatrolTeamRogaining = 7; // Both patrols and teams
+
 constexpr static int AddTeamClasses = 4;
 constexpr static int AddPatrolClasses = 3;
 constexpr static int AddRogainingClasses = 2;
@@ -998,6 +1002,9 @@ int TabList::listCB(gdioutput &gdi, GuiEventType type, BaseInfo *data) {
       bool allClasses = baseType == AddAllClasses;
       bool rogaining = baseType == AddRogainingClasses;
       bool rogainingTeam = baseType == AddTeamRogaining;
+      bool rogainingPatrol = baseType == AddPatrolRogaining;
+      bool rogainingPatrolTeam = baseType == AddPatrolTeamRogaining;
+
       bool patrol = baseType == AddPatrolClasses;
       bool team = baseType == AddTeamClasses;
       oe->sanityCheck(gdi, bi.id.substr(0, 7) == "Result:");
@@ -1024,7 +1031,18 @@ int TabList::listCB(gdioutput &gdi, GuiEventType type, BaseInfo *data) {
       else if (rogainingTeam) {
         ClassConfigInfo cnf;
         oe->getClassConfigurationInfo(cnf);
-        cnf.getRogaining(par.selection);
+        cnf.getRogainingTeam(par.selection);
+      }
+      else if (rogainingPatrol) {
+        ClassConfigInfo cnf;
+        oe->getClassConfigurationInfo(cnf);
+        cnf.getRogainingPatrol(par.selection);
+      }
+      else if (rogainingPatrolTeam) {
+        ClassConfigInfo cnf;
+        oe->getClassConfigurationInfo(cnf);
+        cnf.getRogainingTeam(par.selection);
+        cnf.getRogainingPatrol(par.selection);
       }
       else if (team) {
         ClassConfigInfo cnf;
@@ -2622,9 +2640,10 @@ bool TabList::loadPage(gdioutput &gdi)
       }
     }
 
-    if (cnf.hasRogainingTeam()) {
+    if (cnf.hasRogainingTeam() || cnf.hasRogainingPatrol()) {
       checkWidth(gdi);
-      gdi.addButton("StartL:teamstartlist", "Rogaining", ListsCB).setExtra(AddRogainingClasses);
+      gdi.addButton("StartL:teamstartlist", 
+                    L"#" + lang.tl("Rogaining") + L" (" + lang.tl("Patrull") + L")", ListsCB).setExtra(AddPatrolTeamRogaining);
     }
 
     checkWidth(gdi);
@@ -2721,11 +2740,18 @@ bool TabList::loadPage(gdioutput &gdi)
       gdi.addButton("Result:rogainingind", "Rogaining", ListsCB).setExtra(AddRogainingClasses);
     }
 
-    if (cnf.hasRogainingTeam()) {
+    if (cnf.hasRogainingPatrol()) {
       checkWidth(gdi);
-      gdi.addButton("Result:teamrogainingresult", "Rogaining", ListsCB).setExtra(AddTeamRogaining);
+      gdi.addButton("Result:patrol_team_rogaining", 
+                    L"#" + lang.tl("Rogaining") + L" (" + lang.tl("Patrull") + L")", ListsCB).setExtra(AddPatrolRogaining);
     }
-
+    
+    if (cnf.hasRogainingTeam()) {
+        checkWidth(gdi);
+        gdi.addButton("Result:teamrogainingresult",
+                      L"#" + lang.tl("Rogaining") + L" (" + lang.tl("Lag") + L")", ListsCB).setExtra(AddTeamRogaining);
+    }
+      
     checkWidth(gdi);
     gdi.addButton("ResultList", "Avancerat...", ListsCB);
 
@@ -2793,6 +2819,7 @@ bool TabList::loadPage(gdioutput &gdi)
   bool hasAPIEntry = false;
   bool hasModifiedCard = false;
   bool hasMissingResult = false;
+  bool hasUnpextectedPunchOrder = false;
   {
     vector<pRunner> rr;
     oe->getRunners(0, 0, rr, false);
@@ -2805,6 +2832,8 @@ bool TabList::loadPage(gdioutput &gdi)
         hasModifiedCard = true;
       if (r->getFinishTime() > 0 && !r->hasResult())
         hasMissingResult = true;
+      if (r->getCard() && r->getCard()->unexpectedOrder(r->getStartTime()))
+        hasUnpextectedPunchOrder = true;
     }
   }
 
@@ -2828,7 +2857,12 @@ bool TabList::loadPage(gdioutput &gdi)
   }
   
   if (hasMissingResult) {
-    gdi.addButton("GenLst:missing_card_readout", "Saknad brickavläsning", ListsCB).setExtra(AddTeamClasses | ForcePageBreak);
+    gdi.addButton("GenLst:missing_card_readout", "Saknad brickavläsning", ListsCB);
+    checkWidth(gdi);
+  }
+
+  if (hasUnpextectedPunchOrder) {
+    gdi.addButton("GenLst:unexpected_punch_order", "Unexpected punch order", ListsCB);
     checkWidth(gdi);
   }
 
@@ -2866,6 +2900,11 @@ bool TabList::loadPage(gdioutput &gdi)
     checkWidth(gdi);
 
     gdi.addButton("GenLst:controlstatistics", "Control Statistics", ListsCB);
+    checkWidth(gdi);
+  }
+
+  if (oe->hasRogaining()) {
+    gdi.addButton("GenLst:rogainingstat", "Rogaining Statistics", ListsCB);
     checkWidth(gdi);
   }
 

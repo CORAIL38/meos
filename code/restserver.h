@@ -2,7 +2,7 @@
 
 /************************************************************************
 MeOS - Orienteering Software
-Copyright (C) 2009-2025 Melin Software HB
+Copyright (C) 2009-2026 Melin Software HB
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -32,6 +32,7 @@ Eksoppsvägen 16, SE-75646 UPPSALA, Sweden
 #include <condition_variable>
 #include <tuple>
 #include <random>
+#include "permission.h"
 
 class InfoCompetition;
 class xmlbuffer;
@@ -44,19 +45,6 @@ namespace restbed {
 class RestServer {
 public:
   
-  enum class EntryPermissionClass {
-    None,
-    DirectEntry,
-    Any
-  };
-
-  enum class EntryPermissionType {
-    None,
-    InDbExistingClub,
-    InDbAny,
-    Any
-  };
-
   static vector<pair<wstring, size_t>> getPermissionsPersons();
   static vector<pair<wstring, size_t>> getPermissionsClass();
 
@@ -150,6 +138,17 @@ public:
   static void computeRequested(oEvent &ref);
 
   void setEntryPermission(EntryPermissionClass epClass, EntryPermissionType epType);
+
+  static void newEntryErrorCheck(oEvent &oe,
+                                 uint64_t &extId,
+                                 wstring &name,
+                                 wstring &club,
+                                 int classId,
+                                 int cardNo,
+                                 EntryPermissionClass epClass,
+                                 EntryPermissionType epType,
+                                 bool &permissionDenied,
+                                 wstring &error);
 
   void setRootMap(const string &rootMap);
   const string &getRootMap() const { return root; }

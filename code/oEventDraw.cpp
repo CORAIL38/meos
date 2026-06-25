@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -221,6 +221,12 @@ namespace {
 
     sort(sizeClub.rbegin(), sizeClub.rend());
 
+    set<int> largeClubs;
+    for (int i = 0; i < 3 && i < sizeClub.size(); i++) {
+      if (sizeClub[i].first > 3)
+        largeClubs.insert(sizeClub[i].second);
+    }
+
     int targetGroupSize = max<int>(runners.size() / 20, sizeClub.front().first);
 
     vector<vector<pRunner>> groups(1);
@@ -335,7 +341,92 @@ namespace {
       runners.push_back(groups[groupToUse].back());
       groups[groupToUse].pop_back();
     }
+
+    // Post adjustments
+
+    // Extra randomization
+    int nExtraSwap = runners.size() * 2;
+
+    std::random_device device;  // a seed source for the random number engine
+    std::mt19937 generator(device()); // mersenne_twister_engine seeded with rd()
+    std::uniform_int_distribution<> distrib(0, runners.size()-1);
+
+    auto compatible = [](int c1, int c2) {
+      return c1 <= 0 || c2 <= 0 || c1 != c2;
+    };
+
+    for (int i = 0; i < nExtraSwap; i++) {
+      int a = distrib(generator);
+      int b = distrib(generator);
+      if (a == b)
+        continue;
+
+      int ac = runners[a]->getClubId();
+      int bc = runners[b]->getClubId();
+
+      if (ac != bc && (largeClubs.count(ac) || largeClubs.count(bc)))
+        continue; // Don't move large clubs which are carefully distributed
+
+      int aNbhd[2] = { -1, -1 };
+      int bNbhd[2] = { -1, -1 };
+
+      if (a > 0)
+        aNbhd[0] = runners[a - 1]->getClubId();
+      if (a + 1 < runners.size())
+        aNbhd[1] = runners[a + 1]->getClubId();
+
+      if (b > 0)
+        bNbhd[0] = runners[b - 1]->getClubId();
+      if (b + 1 < runners.size())
+        bNbhd[1] = runners[b + 1]->getClubId();
+
+      
+      if (compatible(aNbhd[0], bc) && compatible(aNbhd[1], bc) && compatible(bNbhd[0], ac) && compatible(bNbhd[1], ac)) {
+        swap(runners[a], runners[b]);
+      }
+    }
+
+    // Ensure there are no adjacent competitors from the same club
+
+    int noResolve = -1;
+    int maxIter = runners.size() * 2;
+    for (int i = 1; i < runners.size(); i++) {
+      if (--maxIter < 0)
+        break;
+      if (runners[i - 1]->getClubId() == runners[i]->getClubId()) {
+        int cid = runners[i]->getClubId();
+        if (cid == noResolve)
+          continue; // Already know we cannot resolve this club
+        int resolveIx = -1;
+        for (int j = 1; j < runners.size(); j++) {
+          if (runners[j - 1]->getClubId() != cid && runners[j]->getClubId() != cid) {
+            resolveIx = j;
+          }
+        }
+
+        if (resolveIx == -1) {
+          noResolve = cid;
+          continue;
+        }
+
+        pRunner toMove = runners[i];
+        for (int j = i + 1; j < runners.size(); j++) {
+          runners[j - 1] = runners[j];
+        }
+
+        if (resolveIx > i)
+          resolveIx--;
+
+        for (int j = runners.size() - 1; j > resolveIx; j--) {
+          runners[j] = runners[j - 1];
+        }
+
+        runners[resolveIx] = toMove;
+        i--;
+      }
+    }
   }
+
 }
 
 
@@ -503,14 +594,14 @@ int DrawOptimAlgo::initData(DrawInfo& di, vector<ClassInfo>& cInfo, int useNCont
       vector<pRunner> cr;
       oe->getRunners(c_it->getId(), 0, cr, false);
       for (pRunner r : cr) {
-        if (r->getStatus() == StatusNotCompetiting || r->getStatus() == StatusCANCEL)
+        if (r->getStatus() == StatusNotCompeting || r->getStatus() == StatusCANCEL)
           continue;
         if (r->getStartGroup(true) == ci.startGroupId)
           nr++;
       }
     }
 
-    if (ci.nVacant == -1 || !ci.nVacantSpecified || di.changedVacancyInfo) {
+    if (ci.nVacant == -1 || !(ci.nVacantSpecified || ci.nVacantLoaded) || di.changedVacancyInfo) {
       // Auto initialize
       int nVacancies = int(nr * di.vacancyFactor + 0.5);
       nVacancies = max(nVacancies, di.minVacancy);
@@ -522,15 +613,17 @@ int DrawOptimAlgo::initData(DrawInfo& di, vector<ClassInfo>& cInfo, int useNCont
 
       ci.nVacant = nVacancies;
       ci.nVacantSpecified = false;
+      ci.nVacantLoaded = true;
     }
 
-    if (!ci.nExtraSpecified || di.changedExtraInfo) {
+    if (!(ci.nExtraSpecified || ci.nExtraLoaded) || di.changedExtraInfo) {
       // Auto initialize
       ci.nExtra = max(int(nr * di.extraFactor + 0.5), 1);
 
       if (di.extraFactor == 0)
         ci.nExtra = 0;
       ci.nExtraSpecified = false;
+      ci.nExtraLoaded = true;
     }
 
     ci.nRunners = nr + ci.nVacant;
@@ -1417,6 +1510,8 @@ void oEvent::optimizeStartOrder(vector<pair<int, wstring>>& outLines, DrawInfo& 
 
   outLines.emplace_back(0, L"# ");
   
+  if (!di.startName.empty())
+    outLines.emplace_back(0, L"Beaktar endast X#" + di.startName);
   outLines.emplace_back(fontMediumPlus, L"Antal startande per intervall (inklusive redan lottade)");
   wstring str;
 
@@ -1523,7 +1618,9 @@ void oEvent::loadDrawSettings(const set<int>& classes, DrawInfo& drawInfo, vecto
       cInfo[i].firstStartComputed = cInfo[i].firstStart = (fs - drawInfo.firstStart) / drawInfo.baseInterval;
       cInfo[i].interval = iv / drawInfo.baseInterval;
       cInfo[i].nVacant = pc->getDrawVacant();
+      cInfo[i].nVacantLoaded = true;
       cInfo[i].nExtra = pc->getDrawNumReserved();
+      cInfo[i].nExtraLoaded = true;
       auto spec = pc->getDrawSpecification();
       const bool hasFixedTime = spec.count(oClass::DrawSpecified::FixedTime) != 0;
       if (spec.count(oClass::DrawSpecified::FixedInterval) || hasFixedTime)
@@ -2195,6 +2292,7 @@ void oEvent::drawListStartGroups(const vector<ClassDrawSpecification>& spec,
       auto& gi = gInfo[spec[k].classID];
       for (pRunner r : rl) {
         r->setStartTime(0, true, oBase::ChangeType::Update, false);
+        r->storeDefaultStartTime();
         int gid = r->getStartGroup(true);
         ++rPerGroup[gid];
         ++gi.rPerGroup[gId2Ix[gid]];
@@ -2384,7 +2482,7 @@ void oEvent::drawList(const vector<ClassDrawSpecification>& spec,
     for (it = Runners.begin(); it != Runners.end(); ++it) {
       int cid = it->getClassId(true);
       if (!it->isRemoved() && clsId2Ix.count(cid)) {
-        if (it->getStatus() == StatusNotCompetiting || it->getStatus() == StatusCANCEL)
+        if (it->getStatus() == StatusNotCompeting || it->getStatus() == StatusCANCEL)
           continue;
         int ix = clsId2Ix[cid];
         if (spec[ix].startGroup != 0 && it->getStartGroup(true) != spec[ix].startGroup)
@@ -2406,7 +2504,7 @@ void oEvent::drawList(const vector<ClassDrawSpecification>& spec,
 
     for (it = Runners.begin(); it != Runners.end(); ++it) {
       if (!it->isRemoved() && clsId2Ix.count(it->getClassId(true))) {
-        if (it->getStatus() == StatusNotCompetiting || it->getStatus() == StatusCANCEL)
+        if (it->getStatus() == StatusNotCompeting || it->getStatus() == StatusCANCEL)
           continue;
 
         int st = it->getStartTime();
@@ -2469,7 +2567,6 @@ void oEvent::drawList(const vector<ClassDrawSpecification>& spec,
   if (gdibase.isTest())
     InitRanom(0, 0);
 
-
   vector<pRunner> vacant;
   VacantPosition vp = spec[0].vacantPosition;
   if (vp != VacantPosition::Mixed) {
@@ -2518,21 +2615,14 @@ void oEvent::drawList(const vector<ClassDrawSpecification>& spec,
   vector<pair<int, int>> newStartNo;
   for (unsigned k = 0; k < stimes.size(); k++) {
     runners[k]->setStartTime(stimes[k], true, ChangeType::Update, false);
+    runners[k]->storeDefaultStartTime();
     runners[k]->synchronize();
     minStartNo = min(minStartNo, runners[k]->getStartNo());
     newStartNo.emplace_back(stimes[k], k);
   }
-  /*
-  gdibase.dropLine();
-  gdibase.addString("", 1, L"Draw: " + oe->getClass(spec[0].classID)->getName());
-  for (unsigned k = 0; k < stimes.size(); k++) {
-    gdibase.addString("", 0, runners[k]->getCompleteIdentification() + L"  " + runners[k]->getStartTimeS());
-  }
-  */
+  
   sort(newStartNo.begin(), newStartNo.end());
-  //CurrentSortOrder = SortByStartTime;
-  //sort(runners.begin(), runners.end());
-
+  
   if (minStartNo == 0)
     minStartNo = nextFreeStartNo + 1;
 
@@ -2696,6 +2786,7 @@ void oEvent::drawListClumped(int ClassID, int FirstStart, int Interval, int Vaca
   for (it = Runners.begin(); it != Runners.end(); ++it) {
     if (it->Class && it->Class->Id == ClassID && !it->isRemoved()) {
       it->setStartTime(stimes[k++], true, oBase::ChangeType::Update, false);
+      it->storeDefaultStartTime();
       it->StartNo = k;
       it->synchronize();
     }
@@ -2719,7 +2810,12 @@ void oEvent::automaticDrawAll(gdioutput& gdi,
   const double extraFactor = 0.0;
   int drawn = 0;
 
-  int baseInterval = convertAbsoluteTimeMS(minIntervall) / 2;
+  int interval = convertAbsoluteTimeMS(minIntervall);
+  int baseInterval;
+  if (interval > timeConstMinute && (interval % timeConstMinute) == 0)
+    baseInterval = timeConstMinute;
+  else
+    baseInterval = interval / 2;
 
   if (baseInterval == 0) {
     gdi.fillDown();
@@ -3064,6 +3160,7 @@ void oEvent::drawPersuitList(int classId, int firstTime, int restartTime,
 
       r->setStartTime(restartTime + ((breakIndex - k + odd) / pairSize) * interval, true, ChangeType::Update, false);
     }
+    r->storeDefaultStartTime();
     r->synchronize(true);
   }
   reCalculateLeaderTimes(classId);
@@ -3093,7 +3190,7 @@ int oEvent::requestStartTime(int runnerId, int afterThisTime, int minTimeInterva
   int desiredSlot = afterThisTime / timeDivider;
 
   for (const oRunner& r : Runners) {
-    if (r.isRemoved() || r.getStatus() == StatusNotCompetiting || r.getStatus() == StatusCANCEL)
+    if (r.isRemoved() || r.getStatus() == StatusNotCompeting || r.getStatus() == StatusCANCEL)
       continue;
 
     if (r.getStartTime() <= 0)

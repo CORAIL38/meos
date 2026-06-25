@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,6 +34,7 @@
 #include "meos_util.h"
 #include "meosException.h"
 #include "localizer.h"
+#include "maprenderer.h"
 
 using namespace std;
 
@@ -65,7 +66,7 @@ IOF30Interface::IOF30Interface(oEvent *oe, bool forceSplitFee, bool useEventorQu
 }
 
 void IOF30Interface::readCourseData(gdioutput &gdi, const xmlobject &xo, bool updateClass,
-                                    int &courseCount, int &failed) {
+                                    int &courseCount, int &failed, shared_ptr<MapData>& readMapData) {
   gdi.fillDown();
   string ver;
   xo.getObjectString("iofVersion", ver);
@@ -99,8 +100,32 @@ void IOF30Interface::readCourseData(gdioutput &gdi, const xmlobject &xo, bool up
   xRaceCourses.getObjects("Control", xControls);
   xRaceCourses.getObjects("Course", xCourse);
 
+  xmlobject xMap = xRaceCourses.getObject("Map");
+
+  if (xMap) {
+    xmlobject mapPositionTopLeft = xMap.getObject("MapPositionTopLeft");
+    xmlobject mapPositionBottomRight = xMap.getObject("MapPositionBottomRight");
+
+    if (mapPositionTopLeft && mapPositionBottomRight) {
+      readMapData = make_shared<MapData>();
+      readMapData->setMapPos(mapPositionTopLeft.getObjectDouble("y"),
+        mapPositionTopLeft.getObjectDouble("x"),
+        mapPositionBottomRight.getObjectDouble("y"),
+        mapPositionBottomRight.getObjectDouble("x"));
+    }
+  }
+
+  resetLngLatBox();
+
   for (size_t k = 0; k < xControls.size(); k++) {
     readControl(xControls[k]);
+  }
+
+  if (latMax > latMin && lngMax > lngMin) {
+    if (!readMapData)
+      readMapData = make_shared<MapData>();
+
+    readMapData->setCenter((lngMax + lngMin) * 0.5, (latMax + latMin) * 0.5);
   }
 
   map<wstring, pCourse> courses;
@@ -2330,6 +2355,7 @@ pRunner IOF30Interface::readPersonStart(gdioutput &gdi, pClass pc, xmlobject &xo
       rRace->getDI().setString("Bib", bib);
 
       rRace->setStartTime(parseISO8601Time(startTime), true, oBase::ChangeType::Update);
+      rRace->storeDefaultStartTime();
     }
   }
 
@@ -2365,7 +2391,7 @@ wstring formatStatus(RunnerStatus st, const oAbstractRunner *r, bool hasTime) {
     if (!hasTime)
       break;
     return L"NotCompeting";
-  case StatusNotCompetiting: 
+  case StatusNotCompeting: 
     return L"DidNotEnter";
   }
   if (r) {
@@ -2397,7 +2423,7 @@ RunnerStatus parseStatus(const wstring &status) {
   else if (status == L"NotCompeting")
     return StatusOutOfCompetition;
   else if (status== L"DidNotEnter")
-    return StatusNotCompetiting;
+    return StatusNotCompeting;
 
   return StatusUnknown;
 }
@@ -2464,7 +2490,7 @@ pRunner IOF30Interface::readPersonResult(gdioutput &gdi, pClass pc, xmlobject &x
       }*/
       int st = parseISO8601Time(startTime);
       rRace->setStartTime(st, true, oBase::ChangeType::Update);
-
+      rRace->storeDefaultStartTime();
       xmlobject finishTime = results[k].getObject("FinishTime");
       int ft = parseISO8601Time(finishTime);
       rRace->setFinishTime(ft);
@@ -2519,7 +2545,7 @@ pRunner IOF30Interface::readPersonResult(gdioutput &gdi, pClass pc, xmlobject &x
             rRace->setCourseId(c->getId());
         }
 
-        vector<int> mp;
+        vector<pair<int, pControl>> mp;
         rRace->addCard(card, mp);
       }
     }
@@ -3166,8 +3192,12 @@ wstring IOF30Interface::getCurrentTime() const {
 
 wstring IOF30Interface::formatRelTime(int rt) {
   wchar_t bf[32];
-  if (oe.useSubSecond()) 
-    swprintf_s(bf, L"%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+  if (oe.useSubSecond()) {
+    if (timeConstSecond == 10)
+      swprintf_s(bf, L"%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    else
+      swprintf_s(bf, L"%d.%02d", rt / timeConstSecond, rt % timeConstSecond);
+  }
   else
     swprintf_s(bf, L"%d", rt / timeConstSecond);
 
@@ -3612,7 +3642,8 @@ void IOF30Interface::writeResult(xmlparser &xml, const oRunner &rPerson, const o
       xml.write("Score", "type", L"Score", itow(rg));
       xml.write("Score", "type", L"Penalty", itow(r.getRogainingReduction(true)));
     }
-    if ( (r.getTeam() && r.getClassRef(false)->getClassType() != oClassPatrol && !teamsAsIndividual && !qualFinal) || hasInputTime) {
+    if ( (r.getTeam() && r.getClassRef(false)->getClassType() != oClassPatrol && !teamsAsIndividual && !qualFinal) ||
+        (hasInputTime && !r.getClassRef(true)->isSingleStageOnly())) {
       xml.startTag("OverallResult");
 
       int rt = r.getTotalRunningTime();
@@ -3646,7 +3677,7 @@ void IOF30Interface::writeResult(xmlparser &xml, const oRunner &rPerson, const o
       RunnerStatus st = r.getStatusComputed(true);
       if (r.getStatus()>0 && st != StatusDNS && 
                              st != StatusCANCEL && 
-                             st != StatusNotCompetiting) {
+                             st != StatusNotCompeting) {
         const vector<SplitData>& sp = r.getSplitTimes(doUnroll);
         int nc = crs->getNumControls();
         bool hasRogaining = crs->hasRogaining();
@@ -3880,6 +3911,9 @@ void IOF30Interface::writePerson(xmlparser &xml, const oRunner &r) {
       xml.write("Id", externalIdTypes[1], r.getExtIdentifierString2());
     else if (r.getMainRunner()->getExtIdentifier2() != 0)
       xml.write("Id", externalIdTypes[1], r.getMainRunner()->getExtIdentifierString2());
+  }
+  if (includeMeOSId) {
+    xml.write("Id", "type", L"MeOS", itow(r.getId()));
   }
 
   xml.startTag("Name");
@@ -4420,11 +4454,16 @@ int getStartIndex(int sn);
 int getFinishIndex(int sn);
 wstring getStartName(const wstring &start);
 
-int IOF30Interface::getStartIndex(const wstring &startId) {
+int IOF30Interface::getStartFinishIndex(const wstring &startId) {
   int num = getNumberSuffix(startId);
   if (num == 0 && startId.length()>0)
     num = int(startId[startId.length()-1])-'0';
-  return ::getStartIndex(num);
+  return num;
+}
+
+void IOF30Interface::resetLngLatBox() {
+  latMin = lngMin = numeric_limits<double>::infinity();
+  latMax = lngMax = -numeric_limits<double>::infinity();
 }
 
 bool IOF30Interface::readControl(const xmlobject &xControl) {
@@ -4452,58 +4491,57 @@ bool IOF30Interface::readControl(const xmlobject &xControl) {
 
   xmlobject pos = xControl.getObject("MapPosition");
 
-  int xp = 0, yp = 0;
+  double xp = 0.0, yp = 0.0;
   if (pos) {
-    string x,y;
-    pos.getObjectString("x", x);
-    pos.getObjectString("y", y);
-    xp = int(10.0 * atof(x.c_str()));
-    yp = int(10.0 * atof(y.c_str()));
+    xp = pos.getObjectDouble("x");
+    yp = pos.getObjectDouble("y");
   }
 
-  int longitude = 0, latitude = 0;
+  double longitude = 0.0, latitude = 0.0;
 
   xmlobject geopos = xControl.getObject("Position");
 
   if (geopos) {
-    string lat,lng;
-    geopos.getObjectString("lat", lat);
-    geopos.getObjectString("lng", lng);
-    latitude = int(1e6 * atof(lat.c_str()));
-    longitude = int(1e6 * atof(lng.c_str()));
+    latitude = geopos.getObjectDouble("lat");
+    longitude = geopos.getObjectDouble("lng");
+
+    lngMin = min(lngMin, longitude);
+    lngMax = max(lngMax, longitude);
+    latMin = min(latMin, latitude);
+    latMax = max(latMax, latitude);
   }
-  pControl pc = 0;
+
+  pControl pc = nullptr;
 
   if (type == 0) {
     pc = oe.getControl(code, true, false);
   }
   else if (type == 1) {
     wstring start = getStartName(trim(idStr));
-    pc = oe.getControl(getStartIndex(idStr), true, false);
+    int num = getStartFinishIndex(idStr);
+    pc = oe.getControl(::getStartIndex(num), true, false);
     pc->setNumbers(L"");
     pc->setName(start);
     pc->setStatus(oControl::ControlStatus::StatusStart);
   }
   else if (type == 2) {
     wstring finish = trim(idStr);
-    int num = getNumberSuffix(finish);
-    if (num == 0 && finish.length()>0)
-      num = int(finish[finish.length()-1])-'0';
+    int num = getStartFinishIndex(finish);
     if (num > 0 && num<10)
       finish = lang.tl(L"Mål ") + itow(num);
     else
       finish = lang.tl(L"Mål");
-    pc = oe.getControl(getFinishIndex(num), true, false);
+    pc = oe.getControl(::getFinishIndex(num), true, false);
     pc->setNumbers(L"");
     pc->setName(finish);
     pc->setStatus(oControl::ControlStatus::StatusFinish);
   }
 
   if (pc) {
-    pc->getDI().setInt("xpos", xp);
-    pc->getDI().setInt("ypos", yp);
-    pc->getDI().setInt("longcrd", longitude);
-    pc->getDI().setInt("latcrd", latitude);
+    pc->getDI().setDouble("xpos", xp);
+    pc->getDI().setDouble("ypos", yp);
+    pc->getDI().setDouble("longcrd", longitude);
+    pc->getDI().setDouble("latcrd", latitude);
     pc->synchronize();
   }
   return true;
@@ -4584,6 +4622,8 @@ pCourse IOF30Interface::readCourse(const xmlobject &xcrs) {
   xcrs.getObjects("CourseControl", xControls);
 
   vector<pControl> ctrlCode;
+  pControl startC = nullptr;
+  pControl finishC = nullptr;
   vector<int> legLen;
   wstring startName;
   bool hasRogaining = false;
@@ -4591,15 +4631,24 @@ pCourse IOF30Interface::readCourse(const xmlobject &xcrs) {
   for (size_t k = 0; k < xControls.size(); k++) {
     string type;
     xControls[k].getObjectString("type", type);
-    if (type == "Start" && startName.empty()) {
+    if (type == "Start") {
       wstring idStr;
       xControls[k].getObjectString("Control", idStr);
-      pControl pStart = oe.getControl(getStartIndex(idStr), false, false);
-      if (pStart)
+      pControl pStart = oe.getControl(::getStartIndex(getStartFinishIndex(idStr)), false, false);
+      
+      if (startC == nullptr) // Take first start
+        startC = pStart;
+      if (pStart && startName.empty())
         startName = pStart->getName();
     }
     else if (type == "Finish") {
       legLen.push_back(xControls[k].getObjectInt("LegLength"));
+      wstring idStr;
+      xControls[k].getObjectString("Control", idStr);
+      pControl pFinish = oe.getControl(::getFinishIndex(getStartFinishIndex(idStr)), false, false);
+
+      if (pFinish != nullptr) // Take last finish
+        finishC = pFinish;
     }
     else {
       xmlList xPunchControls;
@@ -4653,6 +4702,8 @@ pCourse IOF30Interface::readCourse(const xmlobject &xcrs) {
     if (pc->getNumControls() + 1 == legLen.size())
       pc->setLegLengths(legLen);
     pc->getDI().setInt("Climb", climb);
+
+    pc->setStartFinish(startC, finishC);
 
     pc->setStart(startName, true);
     if (hasRogaining) {
@@ -4878,9 +4929,10 @@ void IOF30Interface::getIdTypes(vector<string> &types) {
   types.insert(types.begin(), idProviders.begin(), idProviders.end());
 }
 
-void IOF30Interface::setPreferredIdType(const pair<string, string> &type) {
+void IOF30Interface::setPreferredIdType(const pair<string, string> &type, bool includeMeOS) {
   preferredIdProvider = type;
   externalIdTypes.clear();
+  includeMeOSId = includeMeOS;
   if (!type.first.empty() || !type.second.empty()) {
     string stype = "type";
     if (!type.first.empty())

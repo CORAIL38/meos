@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -71,10 +71,12 @@ struct ClassInfo {
   int nRunnersGroup = 0; // Number of runners in group
   int nRunnersCourse = 0; // Number of runners on this course
 
-  bool nVacantSpecified = 0;
-  int nVacant = -1;
+  bool nVacantSpecified = false;
+  bool nExtraSpecified = false;
+  bool nVacantLoaded = false; // Set to true to indicate computed (default) or loaded from saved
+  bool nExtraLoaded = false;// Set to true to indicate computed (default) or loaded from saved
 
-  bool nExtraSpecified = 0;
+  int nVacant = -1;
   int nExtra = 0;
 
   int sortFactor = 0;

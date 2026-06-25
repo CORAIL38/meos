@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@
 #include "meos_util.h"
 
 #include <algorithm>
-#include <cassert>
+#include "xmlparser.h"
 
 #include "SportIdent.h"
 //////////////////////////////////////////////////////////////////////
@@ -185,11 +185,11 @@ void oCard::importPunches(const string &s) {
   return;
 }
 
-bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
+bool oCard::fillPunches(gdioutput& gdi, const string& name, oCourse* crs) {
   oPunchList::iterator it;
   synchronize(true);
   int ix = 0;
-  for (it=punches.begin(); it != punches.end(); ++it) {
+  for (it = punches.begin(); it != punches.end(); ++it) {
     it->tCardIndex = ix++;
   }
 
@@ -198,40 +198,39 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
   bool showStart = crs ? !crs->useFirstAsStart() : true;
   bool showFinish = crs ? !crs->useLastAsFinish() : true;
 
-  bool hasStart=false;
-  bool hasFinish=false;
-  bool extra=false;
-  int k=0;
+  bool hasStart = false;
+  bool hasFinish = false;
+  bool extra = false;
+  int k = 0;
   int currentTimeAdjust = 0;
-  pControl ctrl=0;
+  pControl ctrl = 0;
 
-  int matchPunch=0;
-  int punchRemain=1;
+  int matchPunch = 0;
+  int punchRemain = 1;
   bool hasRogaining = false;
   if (crs) {
-    ctrl=crs->getControl(matchPunch);
+    ctrl = crs->getControl(matchPunch);
     hasRogaining = crs->hasRogaining();
   }
   if (ctrl)
-    punchRemain=ctrl->getNumMulti();
+    punchRemain = ctrl->getNumMulti();
 
   map<int, pair<int, pPunch > > rogainingIndex;
-  
+
   if (crs) {
-    for (it=punches.begin(); it != punches.end(); ++it) {
+    for (it = punches.begin(); it != punches.end(); ++it) {
       if (it->tRogainingIndex >= 0) {
         rogainingIndex[it->tRogainingIndex] = make_pair(it->tCardIndex, &*it);
       }
-      ix++;
     }
   }
 
-  for (it=punches.begin(); it != punches.end(); ++it){
-    if (!hasStart && !it->isStart()){
-      if (it->isUsed){
+  for (it = punches.begin(); it != punches.end(); ++it) {
+    if (!hasStart && !it->isStart()) {
+      if (it->isUsed) {
         if (showStart)
-          gdi.addItem(name, lang.tl("Start")+L"\t\u2013", -1);
-        hasStart=true;
+          gdi.addItem(name, lang.tl("Start") + L"\t\u2013", -1);
+        hasStart = true;
       }
     }
 
@@ -240,24 +239,24 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
 
     {
       if (it->isStart())
-        hasStart=true;
-      else if (crs && it->isUsed && !it->isFinish() &&  !it->isCheck()) {
-        while(ctrl && it->tMatchControlId!=ctrl->getId()) {
+        hasStart = true;
+      else if (crs && it->isUsed && !it->isFinish() && !it->isCheck()) {
+        while (ctrl && it->tMatchControlId != ctrl->getId()) {
           if (ctrl->isRogaining(hasRogaining)) {
             if (rogainingIndex.count(matchPunch) == 1)
               gdi.addItem(name, rogainingIndex[matchPunch].second->getString(),
-                                rogainingIndex[matchPunch].first);
+                rogainingIndex[matchPunch].first);
             else
-              gdi.addItem(name, L"\u2013\t\u2013", -1);
+              gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
           }
           else {
-            while(0<punchRemain--) {
-              gdi.addItem(name, L"\u2013\t\u2013", -1);
+            while (0 < punchRemain--) {
+              gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
             }
           }
           // Next control
-          ctrl=crs ? crs->getControl(++matchPunch):0;
-          punchRemain=ctrl ? ctrl->getNumMulti() : 1;
+          ctrl = crs ? crs->getControl(++matchPunch) : nullptr;
+          punchRemain = ctrl ? ctrl->getNumMulti() : 1;
         }
       }
 
@@ -270,9 +269,9 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
               while (ctrl && ctrl->isRogaining(hasRogaining)) {
                 if (rogainingIndex.count(matchPunch) == 1)
                   gdi.addItem(name, rogainingIndex[matchPunch].second->getString(),
-                                    rogainingIndex[matchPunch].first);
+                    rogainingIndex[matchPunch].first);
                 else
-                  gdi.addItem(name, L"\u2013\t\u2013", -1);
+                  gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
                 ctrl = crs->getControl(++matchPunch);
               }
               punchRemain = ctrl ? ctrl->getNumMulti() : 1;
@@ -285,8 +284,8 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
         }
 
         if (it->isFinish() && crs) { //Add missing punches before the finish
-          while(ctrl) {
-            gdi.addItem(name, L"\u2013\t\u2013", -1);
+          while (ctrl) {
+            gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
             ctrl = crs->getControl(++matchPunch);
           }
         }
@@ -304,17 +303,17 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
 
         if (!(it->isFinish() || it->isStart())) {
           punchRemain--;
-          if (punchRemain<=0) {
+          if (punchRemain <= 0) {
             // Next contol
-            ctrl = crs ? crs->getControl(++matchPunch):0;
+            ctrl = crs ? crs->getControl(++matchPunch) : 0;
 
             // Match rogaining here
             while (ctrl && ctrl->isRogaining(hasRogaining)) {
               if (rogainingIndex.count(matchPunch) == 1)
                 gdi.addItem(name, rogainingIndex[matchPunch].second->getString(),
-                                  rogainingIndex[matchPunch].first);
+                  rogainingIndex[matchPunch].first);
               else
-                gdi.addItem(name, L"\u2013\t\u2013", -1);
+                gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
               ctrl = crs->getControl(++matchPunch);
             }
             punchRemain = ctrl ? ctrl->getNumMulti() : 1;
@@ -322,48 +321,44 @@ bool oCard::fillPunches(gdioutput &gdi, const string &name, oCourse *crs) {
         }
       }
       else
-        extra=true;
-
+        extra = true;
       k++;
-
       if (it->isFinish() && showFinish)
-        hasFinish=true;
+        hasFinish = true;
     }
   }
 
   if (!hasStart && showStart)
-    gdi.addItem(name, lang.tl("Start")+L"\t\u2013", -1);
+    gdi.addItem(name, lang.tl("Start") + L"\t\u2013", -1);
 
   if (!hasFinish && showFinish) {
-
     while (ctrl) {
       if (ctrl->isRogaining(hasRogaining)) {
         // Check if we have reach finihs without adding rogaining punches
         while (ctrl && ctrl->isRogaining(hasRogaining)) {
           if (rogainingIndex.count(matchPunch) == 1)
             gdi.addItem(name, rogainingIndex[matchPunch].second->getString(),
-                              rogainingIndex[matchPunch].first);
+              rogainingIndex[matchPunch].first);
           else
-            gdi.addItem(name, L"\u2013\t\u2013", -1);
+            gdi.addItem(name, L"\u2013\t\u2013", getUnmatchedPunchId(matchPunch));
           ctrl = crs->getControl(++matchPunch);
         }
         punchRemain = ctrl ? ctrl->getNumMulti() : 1;
       }
       else {
-        gdi.addItem(name, L"-\t-", -1);
+        gdi.addItem(name, L"-\t-", getUnmatchedPunchId(matchPunch));
         ctrl = crs->getControl(++matchPunch);
       }
     }
-
-    gdi.addItem(name, lang.tl("Mål")+L"\t\u2013", -1);
+    gdi.addItem(name, lang.tl("Mål") + L"\t\u2013", -1);
   }
 
   if (extra) {
     //Show punches that are not used.
-    k=0;
+    k = 0;
     gdi.addItem(name, L"", -1);
     gdi.addItem(name, lang.tl("Extra stämplingar"), -1);
-    for (it=punches.begin(); it != punches.end(); ++it) {
+    for (it = punches.begin(); it != punches.end(); ++it) {
       if (!it->isUsed && !(it->isFinish() && showFinish) && !(it->isStart() && showStart))
         gdi.addItem(name, it->getString(), it->tCardIndex);
     }
@@ -884,6 +879,29 @@ int oCard::getStartPunchCode() const {
   return 0;
 }
 
+int oCard::getStartTime(int ptype) const {
+  auto it = punches.begin();
+  if (ptype == oPunch::SpecialPunch::PunchStart) {
+    if (it != punches.end()) {
+      if (it->getTypeCode() == oPunch::SpecialPunch::PunchStart)
+        return it->getTimeInt();
+      ++it;
+      if (it != punches.end()) {
+        if (it->getTypeCode() == oPunch::SpecialPunch::PunchStart)
+          return it->getTimeInt();
+      }
+    }
+  }
+  else {
+    for (auto &p : punches) {
+      if (p.getTypeCode() == ptype)
+        return p.getTimeInt();
+    }
+  }
+  return -1;
+}
+
+
 int oCard::getFinishPunchCode() const {
   auto it = punches.rbegin();
   if (it != punches.rend()) {
@@ -891,4 +909,70 @@ int oCard::getFinishPunchCode() const {
       return it->getPunchUnit();
   }
   return 0;
+}
+
+pair<int, pControl> oCard::getWrongPunch(const oCourse& crs, const oControl& ctrl) {
+  int ix = 0;
+  map<int, pPunch> indexToWrongPunches;
+  vector<int> crsToPunch(crs.getNumControls(), -1);
+  vector<pPunch> controlPunches;
+  for (oPunch &p : punches) {
+    if (p.isStart() || p.isFinish() || p.isCheck())
+      continue;
+
+    if (!p.isUsedInCourse())
+      indexToWrongPunches[ix] = &p;
+    else if (p.tIndex < crsToPunch.size())
+      crsToPunch[p.tIndex] = ix;
+
+    controlPunches.push_back(&p);
+    ++ix;
+  }
+
+  pPunch wrongPunch = nullptr;
+
+  int seedPunchIx = -1;
+  for (int j = 0; j < crs.getNumControls(); j++) {
+    if (crs.getControl(j) == &ctrl) {
+      if (seedPunchIx + 1 < controlPunches.size() && !controlPunches[seedPunchIx + 1]->isUsedInCourse()) {
+        wrongPunch = controlPunches[seedPunchIx + 1];
+        break;
+      }
+    }
+    else {
+      if (crsToPunch[j] >= 0)
+        seedPunchIx = crsToPunch[j];
+    }
+  }
+
+  if (wrongPunch != nullptr) {
+    for (auto& ctrl : oe->Controls) {
+      if (ctrl.isRemoved())
+        continue;
+      if (ctrl.getNNumbers() > 0 && ctrl.hasNumber(wrongPunch->getTypeCode()))
+        return make_pair(wrongPunch->getTypeCode(), &ctrl);
+    }
+
+    return make_pair(wrongPunch->getTypeCode(), nullptr);
+  }
+
+  return make_pair(0, nullptr);
+}
+
+bool oCard::unexpectedOrder(int startTime) const {
+  int lastTime = startTime;
+  for (auto &p : punches) {
+    if (p.isCheck() || p.isStart() || p.getTimeInt() <= 0)
+      continue;
+   
+    if (p.getTypeCode() >= 30 && !p.isUsedInCourse())
+      continue;
+
+    if (p.getTimeInt() < startTime)
+      return true;
+
+    startTime = p.getTimeInt();
+  }
+
+  return false;
 }

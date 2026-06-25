@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,13 +25,12 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "stdafx.h"
-#include "meos.h"
 #include "csvparser.h"
 #include "oEvent.h"
 #include "SportIdent.h"
 #include "meos_util.h"
 #include "localizer.h"
-#include "importformats.h"
+#include "xmlparser.h"
 
 #include "meosexception.h"
 
@@ -214,6 +213,7 @@ bool csvparser::importOS_CSV(oEvent &oe, const wstring &file) {
 
           //r->setCardNo(atoi(sp[rindex+OSRcard]), false);
           r->setStartTime(oe.convertAbsoluteTime(sp[rindex + OSRstart]), true, oBase::ChangeType::Update);
+          r->storeDefaultStartTime();
           r->setFinishTime(oe.convertAbsoluteTime(sp[rindex + OSRfinish]));
 
           if (sp[rindex + OSRstatus].length() > 0)
@@ -254,6 +254,7 @@ bool csvparser::importOE_CSV(oEvent &event, const wstring &file) {
   enum {OEstno=0, OEcard=1, OEid=2, OEsurname=3, OEfirstname=4,
       OEbirth=5, OEsex=6, OEstart=9,  OEfinish=10, OEstatus=12,
       OEclubno=13, OEclub=14, OEclubcity=15, OEnat=16, OEclassno=17, OEclass=18, OEbib=23,
+      OEtextB = 24, OEtextC = 25,
       OErent=35, OEfee=36, OEpaid=37, OEcourseno=38, OEcourse=39,
       OElength=40};
 
@@ -345,6 +346,7 @@ bool csvparser::importOE_CSV(oEvent &event, const wstring &file) {
       pr->setCardNo( wtoi(sp[OEcard]), false );
 
       pr->setStartTime(event.convertAbsoluteTime(sp[OEstart]), true, oBase::ChangeType::Update);
+      pr->storeDefaultStartTime();
       pr->setFinishTime(event.convertAbsoluteTime(sp[OEfinish]));
 
       if (sp[OEstatus].length()>0)
@@ -382,6 +384,12 @@ bool csvparser::importOE_CSV(oEvent &event, const wstring &file) {
 
       if (sp.size()>OEbib && needBib)
         pr->setBib(sp[OEbib], 0, false);
+
+      if (sp.size() > OEtextB)
+        DI.setString("TextA", sp[OEtextB]); // TextA in csv used for bib
+
+      if (sp.size() > OEtextC)
+        DI.setString("Annotation", sp[OEtextC]); // TextA in csv used for bib
 
       if (sp.size()>=38) {//ECO
         DI.setInt("Fee", wtoi(sp[OEfee]));

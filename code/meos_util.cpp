@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,11 +22,11 @@
 
 #include "stdafx.h"
 #include <vector>
-#include <math.h>
 #include "meos_util.h"
 #include "localizer.h"
 #include "oFreeImport.h"
 #include "meosexception.h"
+#include <sstream>
 #include <WinInet.h>
 
 using namespace std;
@@ -629,28 +629,36 @@ const wstring &formatTimeMS(int m, bool force2digit, SubSecond mode) {
     if (force2digit) {
       if (mode == SubSecond::Off || (mode == SubSecond::Auto && m % 10 == 0))
         swprintf_s(bf, L"-%02d:%02d", am / timeConstMinute, (am / timeConstSecond) % 60);
-      else
+      else if (timeUnitsPerSecond == 10)
         swprintf_s(bf, L"-%02d:%02d.%d", am / timeConstMinute, (am / timeConstSecond) % 60, am % timeConstSecond);
+      else
+        swprintf_s(bf, L"-%02d:%02d.%02d", am / timeConstMinute, (am / timeConstSecond) % 60, am % timeConstSecond);
     }
     else {
       if (mode == SubSecond::Off || (mode == SubSecond::Auto && m % 10 == 0))
         swprintf_s(bf, L"-%d:%02d", am / timeConstMinute, (am / timeConstSecond) % 60);
-      else
+      else if (timeUnitsPerSecond == 10)
         swprintf_s(bf, L"-%d:%02d.%d", am / timeConstMinute, (am / timeConstSecond) % 60, am % timeConstSecond);
+      else
+        swprintf_s(bf, L"-%d:%02d.%02d", am / timeConstMinute, (am / timeConstSecond) % 60, am % timeConstSecond);
     }
   }
   else if (am < timeConstHour * 48) {
     if (force2digit) {
       if (mode == SubSecond::Off || (mode == SubSecond::Auto && m % 10 == 0))
         swprintf_s(bf, L"-%02d:%02d:%02d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60);
-      else
+      else if (timeUnitsPerSecond == 10)
         swprintf_s(bf, L"-%02d:%02d:%02d.%d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60, am % timeConstSecond);
+      else
+        swprintf_s(bf, L"-%02d:%02d:%02d.%02d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60, am % timeConstSecond);
     }
     else {
       if (mode == SubSecond::Off || (mode == SubSecond::Auto && m % 10 == 0))
         swprintf_s(bf, L"-%d:%02d:%02d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60);
-      else
+      else if (timeUnitsPerSecond == 10)
         swprintf_s(bf, L"-%d:%02d:%02d.%d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60, am % timeConstSecond);
+      else 
+        swprintf_s(bf, L"-%d:%02d:%02d.%02d", am / timeConstHour, (am / timeConstMinute) % 60, (am / timeConstSecond) % 60, am % timeConstSecond);
     }
   }
   else {
@@ -671,17 +679,25 @@ const wstring &formatTime(int rt, SubSecond mode) {
   wstring &res = StringCache::getInstance().wget();
   if (rt>0 && rt<timeConstHour*999) {
     wchar_t bf[40];
-    if (mode == SubSecond::Off || (mode == SubSecond::Auto && rt % 10 == 0)) {
+    if (mode == SubSecond::Off || (mode == SubSecond::Auto && rt % timeUnitsPerSecond == 0)) {
       if (rt >= timeConstHour && MeOSUtil::useHourFormat)
         swprintf_s(bf, L"%d:%02d:%02d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60);
       else
         swprintf_s(bf, L"%d:%02d", (rt / timeConstMinute), (rt / timeConstSecond) % 60);
     }
     else {
-      if (rt >= timeConstHour && MeOSUtil::useHourFormat)
-        swprintf_s(bf, L"%d:%02d:%02d.%d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60, rt%timeConstSecond);
-      else
-        swprintf_s(bf, L"%d:%02d.%d", (rt / timeConstMinute), (rt / timeConstSecond) % 60, rt%timeConstSecond);
+      if (timeUnitsPerSecond == 10) {
+        if (rt >= timeConstHour && MeOSUtil::useHourFormat)
+          swprintf_s(bf, L"%d:%02d:%02d.%d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60, rt % timeConstSecond);
+        else
+          swprintf_s(bf, L"%d:%02d.%d", (rt / timeConstMinute), (rt / timeConstSecond) % 60, rt % timeConstSecond);
+      }
+      else {
+        if (rt >= timeConstHour && MeOSUtil::useHourFormat)
+          swprintf_s(bf, L"%d:%02d:%02d.%02d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60, rt % timeConstSecond);
+        else
+          swprintf_s(bf, L"%d:%02d.%02d", (rt / timeConstMinute), (rt / timeConstSecond) % 60, rt % timeConstSecond);
+      }
     }
     res = bf;
     return res;
@@ -711,10 +727,12 @@ const wstring &formatTimeHMS(int rt, SubSecond mode) {
   wstring &res = StringCache::getInstance().wget();
   if (rt>=0) {
     wchar_t bf[40];
-    if (mode == SubSecond::Off || (mode == SubSecond::Auto && rt%10 == 0))
+    if (mode == SubSecond::Off || (mode == SubSecond::Auto && rt%timeUnitsPerSecond == 0))
       swprintf_s(bf, 16, L"%02d:%02d:%02d", rt/timeConstHour,(rt/timeConstMinute)%60, (rt/timeConstSecond)%60);
-    else
+    else if (timeUnitsPerSecond == 10)
       swprintf_s(bf, 16, L"%02d:%02d:%02d.%d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60, rt % timeConstSecond);
+    else
+      swprintf_s(bf, 16, L"%02d:%02d:%02d.%02d", rt / timeConstHour, (rt / timeConstMinute) % 60, (rt / timeConstSecond) % 60, rt % timeConstSecond);
 
     res = bf;
     return res;
@@ -815,7 +833,8 @@ const string &unsplit(const vector<string> &split_vector, const string &separato
   return line;
 }
 
-const wstring &unsplit(const vector<wstring> &split_vector, const wstring &separators, wstring &line) {
+template<typename T>
+const T &unsplit(const vector<T> &split_vector, const T &separators, T &line) {
   size_t s = split_vector.size() * separators.size();
   for (size_t k = 0; k < split_vector.size(); k++) {
     s += split_vector[k].size();
@@ -830,6 +849,9 @@ const wstring &unsplit(const vector<wstring> &split_vector, const wstring &separ
   }
   return line;
 }
+
+template const string& unsplit<string>(const vector<string>& split_vector, const string& separators, string& line);
+template const wstring& unsplit<wstring>(const vector<wstring>& split_vector, const wstring& separators, wstring& line);
 
 const wstring &limitText(const wstring& tIn, size_t numChar) {
   wstring& out = StringCache::getInstance().wget();
@@ -2463,9 +2485,10 @@ void checkWriteAccess(const wstring &file) {
 
 void moveFile(const wstring& src, const wstring& dst) {
   DeleteFile(dst.c_str());
-  if (!MoveFile(src.c_str(), dst.c_str())) {
+  if (!CopyFile(src.c_str(), dst.c_str(), false)) {
     throw meosException(L"Kunde inte skriva till 'X'.#" + dst);
   }
+  DeleteFile(src.c_str());
 }
 
 int compareStringIgnoreCase(const wstring &a, const wstring &b) {
@@ -2481,12 +2504,33 @@ const char* meosException::narrow(const wstring& msg) {
 int parseRelativeTime(const char *data) {
   if (data) {
     int ret = atoi(data);
-    if (timeConstSecond > 1) {
+    if (timeConstSecond == 10) {
       int j = 0;
       while (data[j]) {
         if (data[j] == '.') {
           int t = data[j + 1] - '0';
           if (t > 0 && t < 10) {
+            if (ret < 0 || data[0] == '-')
+              return ret * timeConstSecond - t;
+            else
+              return ret * timeConstSecond + t;
+          }
+          break;
+        }
+        j++;
+      }
+    }
+    else if (timeConstSecond == 100) {
+      int j = 0;
+      while (data[j]) {
+        if (data[j] == '.') {
+          int t = data[j + 1] - '0';
+          if (t >= 0 && t < 10) {
+            t *= 10;
+            int t2 = data[j + 2] - '0';
+            if (t2 > 0 && t2 < 10)
+              t += t2;
+
             if (ret < 0 || data[0] == '-')
               return ret * timeConstSecond - t;
             else
@@ -2508,12 +2552,33 @@ int parseRelativeTime(const char *data) {
 int parseRelativeTime(const wchar_t *data) {
   if (data) {
     int ret = _wtoi(data);
-    if (timeConstSecond > 1) {
+    if (timeConstSecond == 10) {
       int j = 0;
       while (data[j]) {
         if (data[j] == '.') {
           int t = data[j + 1] - '0';
           if (t > 0 && t < 10) {
+            if (ret < 0 || data[0] == '-')
+              return ret * timeConstSecond - t;
+            else
+              return ret * timeConstSecond + t;
+          }
+          break;
+        }
+        j++;
+      }
+    }
+    else if (timeConstSecond == 100) {
+      int j = 0;
+      while (data[j]) {
+        if (data[j] == '.') {
+          int t = data[j + 1] - '0';
+          if (t >= 0 && t < 10) {
+            t *= 10;
+            int t2 = data[j + 2] - '0';
+            if (t2 > 0 && t2 < 10)
+              t += t2;
+
             if (ret < 0 || data[0] == '-')
               return ret * timeConstSecond - t;
             else
@@ -2538,14 +2603,20 @@ const wstring &codeRelativeTimeW(int rt) {
 
   if (timeConstSecond == 1 || rt == -1)
     return itow(rt);
-  else if (subSec == 0 && rt != -10)
+  else if (subSec == 0 && rt != -timeConstSecond)
     return itow(rt / timeConstSecond);
   else if (rt > 0) {
-    swprintf_s(bf, L"%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    if (timeConstSecond == 10)
+      swprintf_s(bf, L"%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    else if (timeConstSecond == 100)
+      swprintf_s(bf, L"%d.%02d", rt / timeConstSecond, rt % timeConstSecond);
   }
   else {
     rt = -rt;
-    swprintf_s(bf, L"-%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    if (timeConstSecond == 10)
+      swprintf_s(bf, L"-%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    else if (timeConstSecond == 100)
+      swprintf_s(bf, L"-%d.%02d", rt / timeConstSecond, rt % timeConstSecond);
   }
   wstring &res = StringCache::getInstance().wget();
   res = bf;
@@ -2587,14 +2658,20 @@ const string &codeRelativeTime(int rt) {
 
   if (timeConstSecond == 1 || rt == -1)
     return itos(rt);
-  else if (subSec == 0 && rt != -10)
+  else if (subSec == 0 && rt != -timeConstSecond)
     return itos(rt / timeConstSecond);
   else if (rt > 0) {
-    sprintf_s(bf, "%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    if (timeConstSecond == 10)
+      sprintf_s(bf, "%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    else
+      sprintf_s(bf, "%d.%02d", rt / timeConstSecond, rt % timeConstSecond);
   }
   else {
     rt = -rt;
-    sprintf_s(bf, "-%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    if (timeConstSecond == 10)
+      sprintf_s(bf, "-%d.%d", rt / timeConstSecond, rt % timeConstSecond);
+    else
+      sprintf_s(bf, "-%d.%02d", rt / timeConstSecond, rt % timeConstSecond);
   }
   string &res = StringCache::getInstance().get();
   res = bf;

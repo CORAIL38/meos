@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,10 +33,10 @@ protected:
   wstring url;
   wstring passwd;
   wstring prefix;
-  int cmpId;
+  wstring cmpId;
   set<int> classes;
   bool allClasses = false;
-
+  bool sendCompleteCard = false;
   set<int> controls;
 
   enum class DataType {
@@ -52,6 +52,8 @@ protected:
   bool includeCourse;
   bool sendToURL;
   bool sendToFile;
+  wstring storedName;
+
   mutable InfoCompetition *infoServer;
   wstring exportScript;
   int exportCounter;
@@ -72,6 +74,8 @@ protected:
 
   void saveMachine(oEvent &oe, const wstring &guiInterval) final;
   void loadMachine(oEvent &oe, const wstring &name) final;
+
+  pair<wstring, bool> getCompetitionName(const oEvent &oe) const;
 
 public:
 

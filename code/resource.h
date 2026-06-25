@@ -32,6 +32,8 @@
 #define IDI_MEOSCOMPETITION24           527
 #define IDI_MEOSCHECK                   528
 #define IDI_MEOSERROR                   529
+#define IDI_MEOSLOCK                    530
+#define IDI_MEOSUNLOCK                  531
 
 // Next default values for new objects
 // 

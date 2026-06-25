@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -46,8 +46,9 @@
 #include "qualification_final.h"
 #include "metalist.h"
 #include "cardsystem.h"
-#include "generalresult.h"
 #include "datadefiners.h"
+#include "xmlparser.h"
+#include <unordered_map>
 
 char RunnerStatusOrderMap[100];
 
@@ -118,7 +119,7 @@ const wstring &oAbstractRunner::encodeStatus(RunnerStatus st, bool allowError) {
    case StatusMAX:
      res = L"MX";
      break;
-   case StatusNotCompetiting:
+   case StatusNotCompeting:
      res = L"NC";
      break;
    default:
@@ -136,8 +137,10 @@ RunnerStatus oAbstractRunner::decodeStatus(const wstring &stat) {
   for (wchar_t &t : ustat) {
     t = toupper(t);
   }
+  int statNum = stat.empty() ? -1 : _wtoi(stat.c_str());
+
   for (RunnerStatus st : getAllRunnerStatus())
-    if (encodeStatus(st) == stat)
+    if (encodeStatus(st) == stat || statNum == int(st))
       return st;
 
   return StatusUnknown;
@@ -252,7 +255,7 @@ oAbstractRunner::oAbstractRunner(oEvent* poe, bool loading) :oBase(poe) {
   if (loading || !oe->hasPrevStage())
     inputStatus = StatusOK;
   else
-    inputStatus = StatusNotCompetiting;
+    inputStatus = StatusNotCompeting;
 
   inputTime = 0;
   inputPlace = 0;
@@ -297,8 +300,7 @@ oRunner::oRunner(oEvent *poe) :oAbstractRunner(poe, false) {
   tParentRunner = nullptr;
 
   Card = nullptr;
-  cPriority = 0;
-
+  
   tCachedRunningTime = 0;
   tSplitRevision = -1;
 
@@ -333,7 +335,6 @@ oRunner::oRunner(oEvent *poe, int id) :oAbstractRunner(poe, true) {
   tParentRunner = nullptr;
 
   Card = nullptr;
-  cPriority = 0;
   tCachedRunningTime = 0;
   tSplitRevision = -1;
 
@@ -902,7 +903,7 @@ const wchar_t *formatIOFStatus(RunnerStatus s, bool hasTime) {
   case StatusOutOfCompetition:
     if (!hasTime)
       break;
-  case StatusNotCompetiting:
+  case StatusNotCompeting:
     return L"NotCompeting";
   }
   return L"Inactive";
@@ -918,7 +919,7 @@ wstring oAbstractRunner::getIOFTotalStatusS() const
   return formatIOFStatus(getTotalStatus(), getFinishTime()> 0);
 }
 
-void oRunner::addCard(pCard card, vector<int> &missingPunches) {
+void oRunner::addCard(pCard card, vector<pair<int, pControl>> &missingPunches) {
   RunnerStatus oldStatus = getStatus();
   int oldFinishTime = getFinishTime();
   pCard oldCard = Card;
@@ -1151,7 +1152,7 @@ bool oAbstractRunner::setTmpStore() {
   return res;
 }*/
 
-bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
+bool oRunner::evaluateCard(bool doApply, vector<pair<int, pControl>>& missingPunches,
   int addpunch, ChangeType changeType) {
   if (unsigned(status) >= 100u)
     status = StatusUnknown; //Reset bad input
@@ -1280,26 +1281,26 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
   // Pairs: <control index, point>
   intkeymap<pair<int, int>> rogaining(course->getNumControls());
   unordered_set<int> requiredRG;
-  for (int k = 0; k < course->nControls; k++) {
-    if (course->Controls[k] && course->Controls[k]->isRogaining(hasRogaining)) {
-      int pt = course->Controls[k]->getRogainingPoints();
-      for (int j = 0; j < course->Controls[k]->nNumbers; j++) {
-        rogaining.insert(course->Controls[k]->Numbers[j], make_pair(k, pt));
+  for (int k = 0; k < course->nControls(); k++) {
+    if (course->controls[k] && course->controls[k]->isRogaining(hasRogaining)) {
+      int pt = course->controls[k]->getRogainingPoints();
+      for (int j = 0; j < course->controls[k]->nNumbers; j++) {
+        rogaining.insert(course->controls[k]->Numbers[j], make_pair(k, pt));
       }
-      if (course->Controls[k]->getStatus() == oControl::ControlStatus::StatusRogainingRequired)
+      if (course->controls[k]->getStatus() == oControl::ControlStatus::StatusRogainingRequired)
         requiredRG.insert(k);
     }
   }
 
   if (addpunch && Card->punches.empty()) {
-    Card->addPunch(addpunch, -1, course->Controls[0] ? course->Controls[0]->getId() : 0, 0, oCard::PunchOrigin::Manual);
+    Card->addPunch(addpunch, -1, course->controls[0] ? course->controls[0]->getId() : 0, 0, oCard::PunchOrigin::Manual);
   }
 
   if (Card->punches.empty()) {
-    for (int k = 0; k < course->nControls; k++) {
-      if (course->Controls[k]) {
-        course->Controls[k]->startCheckControl();
-        course->Controls[k]->addUncheckedPunches(missingPunches, hasRogaining);
+    for (int k = 0; k < course->nControls(); k++) {
+      if (course->controls[k]) {
+        course->controls[k]->startCheckControl();
+        course->controls[k]->addUncheckedPunches(missingPunches, hasRogaining);
       }
     }
     if ((inTeam || !tUseStartPunch) && doApply)
@@ -1367,8 +1368,8 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
       return -1;
   };
 
-  for (int k = 0; k < course->nControls; k++) {
-    pControl ctrl = course->Controls[k];
+  for (int k = 0; k < course->nControls(); k++) {
+    pControl ctrl = course->controls[k];
     if (ctrl && !ctrl->isRogaining(hasRogaining)) {
       if (ctrl->Status == oControl::ControlStatus::StatusMultiple) {
         for (int j = 0; j < ctrl->nNumbers; j++)
@@ -1395,11 +1396,11 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
   }
 
   p_it = Card->punches.begin();
-  splitTimes.resize(course->nControls, SplitData(NOTATIME, SplitData::SplitStatus::Missing));
+  splitTimes.resize(course->nControls(), SplitData(NOTATIME, SplitData::SplitStatus::Missing));
   int k = 0;
 
 
-  for (k = 0; k < course->nControls; k++) {
+  for (k = 0; k < course->nControls(); k++) {
     //Skip start finish check
     while (p_it != Card->punches.end() &&
       (p_it->isCheck() || p_it->isFinish() || p_it->isStart())) {
@@ -1411,7 +1412,7 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
       break;
 
     oPunchList::iterator tp_it = p_it;
-    pControl ctrl = course->Controls[k];
+    pControl ctrl = course->controls[k];
     int skippedPunches = 0;
 
     if (ctrl) {
@@ -1520,9 +1521,9 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
   }
 
   //Add missing punches for remaining controls
-  while (k < course->nControls) {
-    if (course->Controls[k]) {
-      pControl ctrl = course->Controls[k];
+  while (k < course->nControls()) {
+    if (course->controls[k]) {
+      pControl ctrl = course->controls[k];
       ctrl->startCheckControl();
 
       if (ctrl->hasNumberUnchecked(addpunch)) {
@@ -1552,14 +1553,18 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
 
   // Rogaining logic
   if (rogaining.size() > 0) {
+
+    // Check this later
+    time_limit = course->getMaximumRogainingTime();
+    bool countAllControls = course->getDCI().getInt("NoLatePoints") == 0;
+
     unordered_set<int> visitedControls;
     for (p_it = Card->punches.begin(); p_it != Card->punches.end(); ++p_it) {
       pair<int, int> pt;
       if (rogaining.lookup(p_it->type, pt)) {
-        p_it->anyRogainingMatchControlId = course->Controls[pt.first]->getId();
-        int timeAdjustCtrl = course->Controls[pt.first]->getTimeAdjust();
-        p_it->setTimeAdjust(timeAdjustCtrl);
-
+        p_it->anyRogainingMatchControlId = course->controls[pt.first]->getId();
+        int timeAdjustCtrl = course->controls[pt.first]->getTimeAdjust();
+        p_it->setTimeAdjust(timeAdjustCtrl);        
         if (visitedControls.insert(pt.first).second) {
           requiredRG.erase(pt.first);
           // May noy be revisited
@@ -1567,15 +1572,18 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
           p_it->tRogainingIndex = pt.first;
           p_it->tMatchControlId = p_it->anyRogainingMatchControlId;
           p_it->tRogainingPoints = pt.second;
-          tRogaining.push_back(make_pair(course->Controls[pt.first], p_it->getAdjustedTime()));
+          tRogaining.push_back(make_pair(course->controls[pt.first], p_it->getAdjustedTime()));
           splitTimes[pt.first].setPunchTime(p_it->getAdjustedTime());
-          tRogainingPoints += pt.second;
+
+          int rtHere = p_it->getAdjustedTime() - *refStartTime;
+          if (countAllControls || rtHere <= 0 || time_limit <= 0 || rtHere <= time_limit)
+            tRogainingPoints += pt.second;
         }
       }
     }
 
     for (int mp : requiredRG) {
-      missingPunches.push_back(course->Controls[mp]->getFirstNumber());
+      missingPunches.emplace_back(course->controls[mp]->getFirstNumber(), course->controls[mp]);
     }
 
     OK = missingPunches.empty();
@@ -1589,13 +1597,10 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
       OK = false;
     }
 
-    // Check this later
-    time_limit = course->getMaximumRogainingTime();
-
-    for (int k = 0; k < course->nControls; k++) {
-      if (course->Controls[k] && course->Controls[k]->isRogaining(hasRogaining)) {
+    for (int k = 0; k < course->nControls(); k++) {
+      if (course->controls[k] && course->controls[k]->isRogaining(hasRogaining)) {
         if (!visitedControls.count(k))
-          splitTimes[k].setNotPunched();// = splitTimes[k-1];
+          splitTimes[k].setNotPunched();
       }
     }
   }
@@ -1649,10 +1654,10 @@ bool oRunner::evaluateCard(bool doApply, vector<int>& missingPunches,
     *refStatus = StatusMAX; //Maxtime
 
   if (!missingPunches.empty()) {
-    tProblemDescription = L"Stämplingar saknas: X#" + itow(missingPunches[0]);
+    tProblemDescription = L"Stämplingar saknas: X#" + itow(missingPunches[0].first);
     for (unsigned j = 1; j < 3; j++) {
       if (missingPunches.size() > j)
-        tProblemDescription += L", " + itow(missingPunches[j]);
+        tProblemDescription += L", " + itow(missingPunches[j].first);
     }
     if (missingPunches.size() > 3)
       tProblemDescription += L"...";
@@ -1756,17 +1761,17 @@ void oRunner::doAdjustTimes(pCourse course) {
   if (!Card)
     return;
 
-  assert(course->nControls == splitTimes.size());
+  assert(course->nControls() == splitTimes.size());
   int adjustment = 0;
   oPunchList::iterator it = Card->punches.begin();
 
   adjustTimes.resize(splitTimes.size());
-  for (int n = 0; n < course->nControls; n++) {
-    pControl ctrl = course->Controls[n];
+  for (int n = 0; n < course->nControls(); n++) {
+    pControl ctrl = course->controls[n];
     if (!ctrl)
       continue;
 
-    pControl ctrlPrev = n > 0 ? course->Controls[n - 1] : nullptr;
+    pControl ctrlPrev = n > 0 ? course->controls[n - 1] : nullptr;
 
     while (it != Card->punches.end() && !it->isUsed) {
       it->adjustTimeAdjust(adjustment);
@@ -1776,8 +1781,8 @@ void oRunner::doAdjustTimes(pCourse course) {
     int minTime = ctrl->getMinTime();
     int pN = n -1;
     
-    while (pN >= 0 && (course->Controls[pN]->getStatus() == oControl::ControlStatus::StatusBad ||
-                       course->Controls[pN]->getStatus() == oControl::ControlStatus::StatusBadNoTiming)) {
+    while (pN >= 0 && (course->controls[pN]->getStatus() == oControl::ControlStatus::StatusBad ||
+                       course->controls[pN]->getStatus() == oControl::ControlStatus::StatusBadNoTiming)) {
       pN--; // Skip bad controls
     }
 
@@ -2377,7 +2382,8 @@ bool oRunner::operator<(const oRunner &c) const {
     else
       return Id < c.Id;
   }
-  else if (oe->CurrentSortOrder == ClassPoints) {
+  else if (oe->CurrentSortOrder == ClassPoints || oe->CurrentSortOrder == ClassTotalPoints) {
+    const bool total = oe->CurrentSortOrder == ClassTotalPoints;
     if (myClass != cClass)
       return myClass->tSortIndex < cClass->tSortIndex || (myClass->tSortIndex == cClass->tSortIndex && myClass->Id < cClass->Id);
     else if (tDuplicateLeg != c.tDuplicateLeg)
@@ -2385,12 +2391,19 @@ bool oRunner::operator<(const oRunner &c) const {
     else if (tStatus != c.tStatus)
       return RunnerStatusOrderMap[tStatus] < RunnerStatusOrderMap[c.tStatus];
     else {
-      if (tStatus == StatusOK) {
-        int myP = getRogainingPoints(true, false);
-        int otherP = c.getRogainingPoints(true, false);
+      bool ok = total ? getTotalStatus(false) == StatusOK : tStatus == StatusOK;
+      if (ok) {
+        int myP = getRogainingPoints(true, total);
+        int otherP = c.getRogainingPoints(true, total);
 
         if (myP != otherP)
           return myP > otherP;
+        if (total) {
+          int t = getTotalRunningTime(FinishTime, true, true);
+          int ct = c.getTotalRunningTime(c.FinishTime, true, true);
+          if (t != ct)
+            return t < ct;        
+        }
         int t = getRunningTime(true);
         int ct = c.getRunningTime(true);
         if (t != ct)
@@ -2599,15 +2612,29 @@ void oAbstractRunner::setStartNo(int no, ChangeType changeType) {
 }
 
 void oRunner::setStartNo(int no, ChangeType changeType) {
+  bool individualSno = false;
+    
+  if (Class) {
+    // Check if we can allow different forkings for different runners
+    if (Class->isQualificationFinalBaseClass())
+      individualSno = true;
+    else if (Class->getLegType(0) == LegTypes::LTGroup) {
+      individualSno = true; 
+    }
+  }
   if (tInTeam) {
-    if (tInTeam->getStartNo() == 0)
+    if (tInTeam->getStartNo() == 0) {
       tInTeam->setStartNo(no, changeType);
-    else {
+      individualSno = false; // Set all initially
+    }
+    else if (!individualSno) {
       // Do not allow different from team
       no = tInTeam->getStartNo();
     }
   }
-  if (tParentRunner)
+  if (individualSno)
+    oAbstractRunner::setStartNo(no, changeType);
+  else if (tParentRunner)
     tParentRunner->setStartNo(no, changeType);
   else {
     oAbstractRunner::setStartNo(no, changeType);
@@ -2776,7 +2803,7 @@ void oRunner::setCardNo(int cno, bool matchCard, bool updateFromDatabase)
       pCard c = oe->getCardByNumber(cno);
 
       if (c && !c->tOwner) {
-        vector<int> mp;
+        vector<pair<int, pControl>> mp;
         addCard(c, mp);
       }
     }
@@ -2878,28 +2905,39 @@ bool oRunner::isRentalCard(int cno) const {
 }
 
 int oRunner::setCard(int cardId) {
-  pCard c = cardId ? oe->getCard(cardId) : 0;
+  pCard c = cardId ? oe->getCard(cardId) : nullptr;
   int oldId = 0;
+
+  auto clearRG = [](pRunner r) {
+    r->tRogaining.clear();
+    r->tRogainingPoints = 0;
+    r->tRogainingPointsGross = 0;
+    r->tRogainingOvertime = 0;
+  };
 
   if (Card != c) {
     if (Card) {
       oldId = Card->getId();
-      Card->tOwner = 0;
+      Card->tOwner = nullptr;
     }
     if (c) {
       if (c->tOwner) {
         pRunner otherR = c->tOwner;
         assert(otherR != this);
-        otherR->Card = 0;
+        otherR->Card = nullptr;
         otherR->updateChanged();
         otherR->setStatus(StatusUnknown, true, ChangeType::Update);
         otherR->synchronize(true);
+        clearRG(otherR);
       }
       c->tOwner = this;
       setCardNo(c->cardNo, false, true);
     }
+    else {
+      clearRG(this);
+    }
     Card = c;
-    vector<int> mp;
+    vector<pair<int, pControl>> mp;
     evaluateCard(true, mp, 0, ChangeType::Update);
     updateChanged();
     synchronize(true);
@@ -3042,7 +3080,7 @@ bool oAbstractRunner::isResultStatus(RunnerStatus st) {
     case StatusDNS:
     case StatusCANCEL:
     case StatusOutOfCompetition:
-    case StatusNotCompetiting:
+    case StatusNotCompeting:
     case StatusUnknown:
     case StatusNoTiming:
       return false;
@@ -3092,7 +3130,7 @@ bool oAbstractRunner::setStatus(RunnerStatus st, bool updateSource, ChangeType c
 
 int oAbstractRunner::getPrelRunningTime() const
 {
-  if (FinishTime>0 && tStatus!=StatusDNS && tStatus != StatusCANCEL && tStatus!=StatusDNF && tStatus!=StatusNotCompetiting)
+  if (FinishTime>0 && tStatus!=StatusDNS && tStatus != StatusCANCEL && tStatus!=StatusDNF && tStatus!=StatusNotCompeting)
     return getRunningTime(true);
   else if (tStatus==StatusUnknown)
     return oe->getComputerTime()-tStartTime;
@@ -3313,7 +3351,7 @@ pRunner oEvent::getRunnerByCardNo(int cardNo, int time, CardLookupProperty prop)
       return nullptr;
     if (skipDNS && (r->getStatus() == StatusDNS || r->getStatus() == StatusCANCEL))
       return nullptr;
-    if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompetiting)
+    if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompeting)
       return nullptr;
     if (prop == CardLookupProperty::ForReadout || prop == CardLookupProperty::CardInUse)
       return r->nextNeedReadout();
@@ -3327,7 +3365,7 @@ pRunner oEvent::getRunnerByCardNo(int cardNo, int time, CardLookupProperty prop)
     if (skipDNS && (r->getStatus() == StatusDNS || r->getStatus() == StatusCANCEL))
       continue;
 
-    if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompetiting)
+    if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompeting)
       continue;
 
     if (prop == CardLookupProperty::OnlyMainInstance && r->skip())
@@ -3431,7 +3469,7 @@ void oEvent::getRunnersByCardNo(int cardNo, bool sortUpdate, CardLookupProperty 
         continue;
       if (prop == CardLookupProperty::OnlyMainInstance && r->getRaceNo() != 0)
         continue;
-      if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompetiting)
+      if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompeting)
         continue;
       if (prop == CardLookupProperty::ForReadout && r->getCard() && !r->getCard()->isConstructedFromPunches())
         continue;
@@ -3448,7 +3486,7 @@ void oEvent::getRunnersByCardNo(int cardNo, bool sortUpdate, CardLookupProperty 
         continue;
       if (prop == CardLookupProperty::OnlyMainInstance && r->getRaceNo() != 0)
         continue;
-      if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompetiting)
+      if (prop != CardLookupProperty::IncludeNotCompeting && r->getStatus() == StatusNotCompeting)
         continue;
       if (prop == CardLookupProperty::ForReadout && r->getCard() && !r->getCard()->isConstructedFromPunches())
         continue;
@@ -4066,7 +4104,7 @@ void oRunner::addTableRow(Table &table) const
   table.set(row++, it, TID_STATUS, getStatusS(false, true), true, cellSelection);
   table.set(row++, it, TID_RUNNINGTIME, getRunningTimeS(true, SubSecond::Auto), false);
   int rp = getRogainingPoints(true, false);
-  table.set(row++, it, TID_POINTS, rp ? itow(rp) : L"", false);
+  table.set(row++, it, TID_POINTS, oe->formatScore(rp), false);
 
   table.set(row++, it, TID_PLACE, getPlaceS(), false);
   table.set(row++, it, TID_STARTNO, itow(getStartNo()), true);
@@ -4093,13 +4131,13 @@ void oRunner::addTableRow(Table &table) const
       }
       table.set(row++, it, 200 + j, formatTime(rawTime));
       table.set(row++, it, 300 + j, oEvent::formatStatus(RunnerStatus(rawStat), false), true, cellSelection);
-      table.set(row++, it, 400 + j, rawPoints > 0 ? itow(rawPoints) : _EmptyWString);
+      table.set(row++, it, 400 + j, oe->formatScore(rawPoints));
       table.set(row++, it, 500 + j, place > 0 ? itow(place) : _EmptyWString);
     }
   }
   table.set(row++, it, TID_INPUTTIME, getInputTimeS(), true);
   table.set(row++, it, TID_INPUTSTATUS, getInputStatusS(), true, cellSelection);
-  table.set(row++, it, TID_INPUTPOINTS, itow(inputPoints), true);
+  table.set(row++, it, TID_INPUTPOINTS, oe->formatScore(inputPoints), true);
   table.set(row++, it, TID_INPUTPLACE, itow(inputPlace), true);
 
   table.set(row++, it, TID_CARDTYPE, cardNumber > 0 ? oe->getCardSystem().getType(cardNumber) : _EmptyWString, false);
@@ -4116,7 +4154,7 @@ pair<int, bool> oRunner::inputData(int id, const wstring &input,
                                    int inputId, wstring &output, bool noUpdate)
 {
   int t,s;
-  vector<int> mp;
+  vector<pair<int, pControl>> mp;
   synchronize(false);
 
   if (id>1000) {
@@ -4152,8 +4190,9 @@ pair<int, bool> oRunner::inputData(int id, const wstring &input,
     break;
     case 4:
     {
-      int points = _wtoi(input.c_str());
-      output = spvec[4 * stage + 2] = itow(points);
+      int points = oe->convertScore(input);
+      spvec[4 * stage + 2] = itow(points);
+      output = oe->formatScore(points);
     }
     break;
     case 5:
@@ -4165,7 +4204,7 @@ pair<int, bool> oRunner::inputData(int id, const wstring &input,
     }
 
     wstring out;
-    unsplit(spvec, L";", out);
+    unsplit<wstring>(spvec, L";", out);
     getDI().setString("InputResult", out);
 
     return make_pair(0, false);
@@ -4285,9 +4324,9 @@ pair<int, bool> oRunner::inputData(int id, const wstring &input,
       break;
 
     case TID_INPUTPOINTS:
-      setInputPoints(_wtoi(input.c_str()));
+      setInputPoints(oe->convertScore(input));
       synchronize(true);
-      output = itow(getInputPoints());
+      output = oe->formatScore(getInputPoints());
       break;
 
     case TID_INPUTPLACE:
@@ -4385,10 +4424,10 @@ int oRunner::getTimeAdjust(int controlNumber) const
 
 int oRunner::getNamedSplit(int controlNumber) const {
   pCourse crs=getCourse(true);
-  if (!crs || unsigned(controlNumber)>=unsigned(crs->nControls))
+  if (!crs || unsigned(controlNumber)>=unsigned(crs->nControls()))
     return -1;
 
-  pControl ctrl=crs->Controls[controlNumber];
+  pControl ctrl=crs->controls[controlNumber];
   if (!ctrl || !ctrl->hasName())
     return -1;
 
@@ -4399,7 +4438,7 @@ int oRunner::getNamedSplit(int controlNumber) const {
  
   //Measure from previous named control
   while (k >= 0) {
-    pControl c = crs->Controls[k];
+    pControl c = crs->controls[k];
 
     if (c && c->hasName()) {
       int dt = getPunchTime(k, false, true, false);
@@ -4520,74 +4559,75 @@ void oRunner::getSplitTime(int courseControlId, RunnerStatus &stat, int &rt) con
     rt=0;
 }
 
-void oRunner::fillSpeakerObject(int leg, int courseControlId, int previousControlCourseId,
-                                bool totalResult, oSpeakerObject &spk) const {
-  spk.status=StatusUnknown;
-  spk.owner=const_cast<oRunner *>(this);
-
-  getSplitTime(courseControlId, spk.status, spk.runningTime.time);
-
-  if (getStatus() == StatusNoTiming || getStatus() == StatusOutOfCompetition) {
-    if (spk.status == StatusOK)
-      spk.status = getStatus();
-  }
-
-  if (courseControlId == oPunch::PunchFinish) {
-    if (FinishTime > 0) 
-      spk.timeSinceChange = oe->getComputerTime() - FinishTime;
-    else
-      spk.timeSinceChange = -1;
-  }
-  else {
-    if (spk.runningTime.time > timeConstSecond * 10)
-      spk.timeSinceChange = oe->getComputerTime() - (spk.runningTime.time + tStartTime);
-    else
-      spk.timeSinceChange = -1;
-  }
+void oRunner::fillSpeakerObject(int leg, int previousControlCourseIdX, const vector<int>& courseControlIds,
+  bool totalResult, oSpeakerObject& spk) const {
+  spk.owner = const_cast<oRunner*>(this);
+  spk.result.clear();
+  spk.timeSinceChange = -1;
   spk.bib = getBib();
   spk.names.push_back(getName());
 
   spk.club = getClub();
-  spk.finishStatus=totalResult ? getTotalStatus() : getStatusComputed(true);
+  spk.finishStatus = totalResult ? getTotalStatus() : getStatusComputed(true);
 
-  spk.startTimeS=getStartTimeCompact();
-  spk.missingStartTime = tStartTime<=0;
+  spk.startTimeS = getStartTimeCompact();
+  spk.missingStartTime = tStartTime <= 0;
 
-  spk.isRendered=false;
+  spk.priority = 0;
 
-  map<int, int>::const_iterator mapit = priority.find(courseControlId);
-  if (mapit!=priority.end())
-    spk.priority=mapit->second;
-  else
-    spk.priority=0;
+  spk.isRendered = false;
 
-  spk.runningTime.preliminary = getPrelRunningTime();
+  for (int courseControlId : courseControlIds) {
+    spk.result.emplace_back();
+    auto& sres = spk.result.back();
+    sres.status = StatusUnknown;
 
-  if (spk.status==StatusOK) {
-    spk.runningTimeLeg=spk.runningTime;
-    spk.runningTime.preliminary = spk.runningTime.time;
-    spk.runningTimeLeg.preliminary = spk.runningTime.time;
-  }
-  else {
-    spk.runningTimeLeg.time = spk.runningTime.preliminary;
-    spk.runningTimeLeg.preliminary = spk.runningTime.preliminary;
-  }
+    getSplitTime(courseControlId, sres.status, sres.runningTime.time);
 
-  if (totalResult) {
-    if (spk.runningTime.preliminary > 0)
-      spk.runningTime.preliminary += inputTime;
-    if (spk.runningTime.time > 0)
-      spk.runningTime.time += inputTime;
+    // Compute time since change
+    if (courseControlId == oPunch::PunchFinish) {
+      if (FinishTime > 0)
+        spk.timeSinceChange = oe->getComputerTime() - FinishTime;
+    }
+    else {
+      if (sres.runningTime.time > timeConstSecond * 10)
+        spk.timeSinceChange = oe->getComputerTime() - (sres.runningTime.time + tStartTime);
+    }
 
-    if (inputStatus != StatusOK)
-      spk.status = spk.finishStatus;
+    spk.priority = speakerPriority;
+    sres.runningTime.preliminary = getPrelRunningTime();
+
+    if (sres.status == StatusOK) {
+      sres.runningTimeLeg = sres.runningTime;
+      sres.runningTime.preliminary = sres.runningTime.time;
+      sres.runningTimeLeg.preliminary = sres.runningTime.time;
+    }
+    else {
+      sres.runningTimeLeg.time = sres.runningTime.preliminary;
+      sres.runningTimeLeg.preliminary = sres.runningTime.preliminary;
+    }
+
+    if (totalResult) {
+      if (sres.runningTime.preliminary > 0)
+        sres.runningTime.preliminary += inputTime;
+      if (sres.runningTime.time > 0)
+        sres.runningTime.time += inputTime;
+
+      if (inputStatus != StatusOK)
+        sres.status = spk.finishStatus;
+    }
+
+    // Adjust status for No timic, not competing etc
+    if (getStatus() == StatusNoTiming || getStatus() == StatusOutOfCompetition) {
+      if (sres.status == StatusOK)
+        sres.status = getStatus();
+    }
   }
 }
 
 pRunner oEvent::findRunner(const wstring &s, int lastId, 
                            const unordered_set<int> &inputFilter,
-                           unordered_set<int> &matchFilter) const
-{
+                           unordered_set<int> &matchFilter) const {
   matchFilter.clear();
   wstring trm = trim(s);
   int len = trm.length();
@@ -4784,8 +4824,8 @@ void oRunner::setBib(const wstring &bib, int bibNumerical, bool updateStartNo) {
   }
 }
 
-void oEvent::analyseDNS(vector<pRunner> &unknown_dns, vector<pRunner> &known_dns,
-                        vector<pRunner> &known, vector<pRunner> &unknown, bool &hasSetDNS)
+void oEvent::analyseDNS(vector<int> &unknown_dns, vector<int> &known_dns,
+                        vector<int> &known, vector<int> &unknown, bool &hasSetDNS)
 {
   autoSynchronizeLists(true);
 
@@ -4831,7 +4871,7 @@ void oEvent::analyseDNS(vector<pRunner> &unknown_dns, vector<pRunner> &known_dns
   for (size_t k=0;k<stUnknown.size();k++) {
     int card = stUnknown[k]->getCardNo();
     if (card == 0)
-      unknown.push_back(stUnknown[k]);
+      unknown.push_back(stUnknown[k]->getId());
     else {
       bool hitCard = knownCards.count(card)==1 && cardCount[card] == 1;
       if (!hitCard) {
@@ -4845,9 +4885,9 @@ void oEvent::analyseDNS(vector<pRunner> &unknown_dns, vector<pRunner> &known_dns
         }
       }
       if (hitCard)
-        known.push_back(stUnknown[k]);
+        known.push_back(stUnknown[k]->getId());
       else
-        unknown.push_back(stUnknown[k]); //These can be given "dns"
+        unknown.push_back(stUnknown[k]->getId()); //These can be given "dns"
     }
   }
 
@@ -4857,7 +4897,7 @@ void oEvent::analyseDNS(vector<pRunner> &unknown_dns, vector<pRunner> &known_dns
   for (size_t k=0;k<stDNS.size(); k++) {
     int card = stDNS[k]->getCardNo();
     if (card == 0)
-      unknown_dns.push_back(stDNS[k]);
+      unknown_dns.push_back(stDNS[k]->getId());
     else {
       bool hitCard = knownCards.count(card)==1 && cardCount[card] == 1;
       if (!hitCard) {
@@ -4871,9 +4911,9 @@ void oEvent::analyseDNS(vector<pRunner> &unknown_dns, vector<pRunner> &known_dns
         }
       }
       if (hitCard)
-        known_dns.push_back(stDNS[k]);
+        known_dns.push_back(stDNS[k]->getId());
       else
-        unknown_dns.push_back(stDNS[k]);
+        unknown_dns.push_back(stDNS[k]->getId());
     }
   }
 }
@@ -5115,7 +5155,7 @@ void oRunner::printSplits(gdioutput& gdi, const oListInfo* li) const {
   int spMax = 0;
   int totMax = 0;
   if (pc) {
-    for (int n = 0; n < pc->nControls; n++) {
+    for (int n = 0; n < pc->nControls(); n++) {
       spMax = max(spMax, getSplitTime(n, false));
       totMax = max(totMax, getPunchTime(n, false, false, false));
     }
@@ -5374,14 +5414,31 @@ void oRunner::printSplits(gdioutput& gdi, const oListInfo* li) const {
 
       if (withAnalysis) {
         vector<wstring> misses;
-        int last = ctrl.size();
-        if (pc->useLastAsFinish())
-          last--;
+        if (cls && cls->isRogaining()) {
+          int cnt = 0;
+          for (auto &p : Card->punches) {
+            const oControl *ctrl = p.getRogainingControl(*pc);
+            if (p.isFinish(pc->getFinishId()) || ctrl) {
+              int missed = getMissedTime(cnt);
+              if (missed > 0) {
+                wstring n = ctrl ? itow(ctrl->getFirstNumber()) : lang.tl("Mål").substr(0, 1);
+                misses.push_back(n + L"/" + formatTime(missed, SubSecond::Off));
+              }
+              cnt++;
+            }
 
-        for (int k = pc->useFirstAsStart() ? 1 : 0; k < last; k++) {
-          int missed = getMissedTime(k);
-          if (missed > 0) {
-            misses.push_back(pc->getControlOrdinal(k) + L"/" + formatTime(missed, SubSecond::Off));
+          }
+        }
+        else {
+          int last = ctrl.size();
+          if (pc->useLastAsFinish())
+            last--;
+
+          for (int k = pc->useFirstAsStart() ? 1 : 0; k < last; k++) {
+            int missed = getMissedTime(k);
+            if (missed > 0) {
+              misses.push_back(pc->getControlOrdinal(k) + L"/" + formatTime(missed, SubSecond::Off));
+            }
           }
         }
         if (misses.size() == 0) {
@@ -5877,8 +5934,8 @@ void oRunner::getSplitAnalysis(vector<int>& deltaTimes) const {
   if (pc->isAdapted())
     reorder = pc->getMapToOriginalOrder();
   else {
-    reorder.reserve(pc->nControls + 1);
-    for (int k = 0; k <= pc->nControls; k++)
+    reorder.reserve(pc->nControls() + 1);
+    for (int k = 0; k <= pc->nControls(); k++)
       reorder.push_back(k);
   }
 
@@ -6194,29 +6251,82 @@ void oRunner::setupRunnerStatistics() const
 }
 
 int oRunner::getMissedTime(int ctrlNo) const {
-  setupRunnerStatistics();
-  if (unsigned(ctrlNo) < tMissedTime.size())
-    return tMissedTime[ctrlNo];
-  else
-    return -1;
+  if (Class && Class->isRogaining()) {
+    pCourse crs = getCourse(false);
+    if (Card && crs) {
+      if (ctrlNo > Card->punches.size())
+        return 0;
+      int count = 0;
+      int prevP = crs->getStartPunchType();
+      int lastTime = getStartTime();
+      for (oPunch &p : Card->punches) {
+        if (p.getTypeCode() < 30 && !p.isFinish(crs->getFinishPunchType()))
+          continue;
+        if (p.isStart(crs->getStartPunchType()))
+          continue;
+        if (!p.getRogainingControl(*crs))
+          continue;
+        int nextP = p.getTypeCode();
+        int thisTime = p.getAdjustedTime();
+
+        if (count == ctrlNo) {
+          auto res = getRogainingAnalysis(prevP, nextP);
+          return res.lostTime;
+        }
+        lastTime = thisTime;
+        prevP = nextP;
+        count++;
+      }
+    }
+    return 0;
+  }
+  else {
+    setupRunnerStatistics();
+    if (unsigned(ctrlNo) < tMissedTime.size())
+      return tMissedTime[ctrlNo];
+    else
+      return -1;
+  }
 }
 
 int oRunner::getMissedTime() const {
-  setupRunnerStatistics();
-  int t = 0;
-  for (size_t k = 0; k < tMissedTime.size(); k++) {
-    if (tMissedTime[k] > 0)
-      t += tMissedTime[k];
+  if (Class && Class->isRogaining()) {
+    pCourse crs = getCourse(false);
+    if (Card && crs) {
+      int prevP = crs->getStartPunchType();
+      int lostT = 0;
+      for (oPunch &p : Card->punches) {
+        if (p.getTypeCode() < 30 && !p.isFinish(crs->getFinishPunchType()))
+          continue;
+        if (p.isStart(crs->getStartPunchType()))
+          continue;
+        if (!p.getRogainingControl(*crs))
+          continue;
+        int nextP = p.getTypeCode();
+        auto res = getRogainingAnalysis(prevP, nextP);
+        lostT += res.lostTime;
+        prevP = nextP;
+      }
+      return lostT;
+    }
+    return 0;
   }
-  return t;
+  else {
+    setupRunnerStatistics();
+    int t = 0;
+    for (size_t k = 0; k < tMissedTime.size(); k++) {
+      if (tMissedTime[k] > 0)
+        t += tMissedTime[k];
+    }
+    return t;
+  }
 }
 
 wstring oRunner::getMissedTimeS() const {
   return formatTimeMS(getMissedTime(), false, SubSecond::Off);
 }
 
-wstring oRunner::getMissedTimeS(int ctrlNo) const
-{
+wstring oRunner::getMissedTimeS(int ctrlNo) const {
   int t = getMissedTime(ctrlNo);
   if (t>0)
     return formatTimeMS(t, false, SubSecond::Off);
@@ -6449,7 +6559,7 @@ wstring oRunner::getCompleteIdentification(IDType type, NameType nameType) const
 
 RunnerStatus oAbstractRunner::getTotalStatus(bool allowUpdate) const {
   RunnerStatus st = getStatusComputed(allowUpdate);
-  if (st == StatusUnknown && inputStatus != StatusNotCompetiting)
+  if (st == StatusUnknown && inputStatus != StatusNotCompeting)
     return StatusUnknown;
   else if (inputStatus == StatusUnknown)
     return StatusDNS;
@@ -6459,7 +6569,7 @@ RunnerStatus oAbstractRunner::getTotalStatus(bool allowUpdate) const {
 
 RunnerStatus oRunner::getTotalStatus(bool allowUpdate) const {
   RunnerStatus stm = getStatusComputed(allowUpdate);
-  if (stm == StatusUnknown && inputStatus != StatusNotCompetiting)
+  if (stm == StatusUnknown && inputStatus != StatusNotCompeting)
     return StatusUnknown;
   else if (inputStatus == StatusUnknown)
     return StatusDNS;
@@ -6537,13 +6647,18 @@ void oAbstractRunner::setInputPlace(int p)
 }
 
 void oRunner::setInputData(const oRunner &r) {
+  if (r.getClassRef(false) && r.getClassRef(true)->isSingleStageOnly()) {
+    resetInputData();
+    return;
+  }
+
   if (!r.multiRunner.empty() && r.multiRunner.back() && r.multiRunner.back() != &r)
     setInputData(*r.multiRunner.back());
   else {
     oDataInterface dest = getDI();
     oDataConstInterface src = r.getDCI();
 
-    if (r.tStatus != StatusNotCompetiting) {
+    if (r.tStatus != StatusNotCompeting) {
       inputTime = r.getTotalRunningTime(r.FinishTime, true, true);
       inputStatus = r.getTotalStatus();
       if (r.tInTeam) { // If a team has not status ok, transfer this status to all team members.
@@ -6715,15 +6830,15 @@ const vector<SplitData> &oRunner::getSplitTimes(bool normalized) const {
     return splitTimes;
   else {
     pCourse pc = getCourse(true);
-    if (pc && pc->isAdapted() && splitTimes.size() == pc->nControls
-        && getCourse(false)->nControls == pc->nControls) {
+    if (pc && pc->isAdapted() && splitTimes.size() == pc->nControls()
+        && getCourse(false)->nControls() == pc->nControls()) {
       if (!normalizedSplitTimes.empty())
         return normalizedSplitTimes;
       const vector<int> &mapToOriginal = pc->getMapToOriginalOrder();
-      normalizedSplitTimes.resize(splitTimes.size()); // nControls
+      normalizedSplitTimes.resize(splitTimes.size());
       vector<int> orderedSplits(splitTimes.size() + 1, -1);
 
-      for (int k = 0; k < pc->nControls; k++) {
+      for (int k = 0; k < pc->nControls(); k++) {
         if (splitTimes[k].hasTime()) {
           int t = -1;
           int j = k - 1;
@@ -6741,7 +6856,7 @@ const vector<SplitData> &oRunner::getSplitTimes(bool normalized) const {
       // Last to finish
       {
         int t = -1;
-        int j = pc->nControls - 1;
+        int j = pc->nControls() - 1;
         while (j >= -1 && t == -1) {
           if (j == -1)
             t = getStartTime();
@@ -6749,11 +6864,11 @@ const vector<SplitData> &oRunner::getSplitTimes(bool normalized) const {
             t = splitTimes[j].getTime(true);
           j--;
         }
-        orderedSplits[mapToOriginal[pc->nControls]] = FinishTime - t;
+        orderedSplits[mapToOriginal[pc->nControls()]] = FinishTime - t;
       }
 
       int accumulatedTime = getStartTime();
-      for (int k = 0; k < pc->nControls; k++) {
+      for (int k = 0; k < pc->nControls(); k++) {
         if (orderedSplits[k] > 0) {
           accumulatedTime += orderedSplits[k];
           normalizedSplitTimes[k].setPunchTime(accumulatedTime);
@@ -6968,7 +7083,7 @@ void oAbstractRunner::resetInputData() {
     inputTime = 0;
     updateChanged();
   }
-  setInputStatus(StatusNotCompetiting);
+  setInputStatus(StatusNotCompeting);
   setInputPoints(0);
 }
 
@@ -7055,7 +7170,7 @@ RunnerStatus  oAbstractRunner::getStageResult(int stage, int &time, int &point, 
     time = 0;
     point = 0;
     place = 0;
-    return StatusNotCompetiting;
+    return StatusNotCompeting;
   }
   time = times[stage];
   point = points[stage];
@@ -7085,7 +7200,7 @@ void oAbstractRunner::addToInputResult(int thisStageNo, const oAbstractRunner *s
   spvec[4*thisStageNo+3] = itow(p);
 
   wstring out;
-  unsplit(spvec, L";", out);
+  unsplit<wstring>(spvec, L";", out);
   getDI().setString("InputResult", out);
 }
 
@@ -7203,7 +7318,7 @@ bool oRunner::canShareCard(const pRunner other, int newCardNo) const {
 
 
   if (other->getStatus() == StatusDNF || other->getStatus() == StatusCANCEL
-      || other->getStatus() == StatusNotCompetiting || other->getStatus() == StatusDNS)
+      || other->getStatus() == StatusNotCompeting || other->getStatus() == StatusDNS)
     return true;
 
   if (other->skip() || other->getCard() || other == this ||
@@ -7276,7 +7391,7 @@ void oRunner::setPayBeforeResult(bool flag) {
   setFlag(TransferFlags::FlagPayBeforeResult, flag);
   if (!flag && getStatus() == StatusDQ)
     setStatus(RunnerStatus::StatusUnknown, true, ChangeType::Update, false);
-  vector<int> mp;
+  vector<pair<int, pControl>> mp;
   evaluateCard(true, mp, 0, ChangeType::Update);
 }
 
@@ -7292,7 +7407,7 @@ void oRunner::setFee(int fee) {
       setStatus(RunnerStatus::StatusUnknown, true, ChangeType::Update, false);
   }
   if (payBeforeResult(true)) {
-    vector<int> mp;
+    vector<pair<int, pControl>> mp;
     evaluateCard(true, mp, 0, ChangeType::Update);
   }
 }
@@ -7644,7 +7759,7 @@ void oRunner::setExtraPersonData(const wstring &sex, const wstring &nationality,
 }
 
 DynamicRunnerStatus oRunner::getDynamicStatus() const  {
-  if (tStatus == StatusNotCompetiting || tStatus == StatusCANCEL || tStatus == StatusDNS)
+  if (tStatus == StatusNotCompeting || tStatus == StatusCANCEL || tStatus == StatusDNS)
     return DynamicRunnerStatus::StatusInactive;
   
   bool finishStat = tStatus != RunnerStatus::StatusUnknown &&
@@ -7662,4 +7777,42 @@ DynamicRunnerStatus oRunner::getDynamicStatus() const  {
     return DynamicRunnerStatus::StatusActive;
 
   return DynamicRunnerStatus::StatusInactive;
+}
+
+void oRunner::restoreDefaultStartTime(bool recalculate) {
+  int st = getDCI().getInt("DrawnTime");
+  if (st < 0)
+    st = 0;
+  if (setStartTime(st, true, ChangeType::Update, recalculate))
+    updateChanged(); // Force an update 
+}
+
+void oRunner::storeDefaultStartTime() {
+  getDI().setInt("DrawnTime", getStartTime());
+}
+
+/** Return best time in class and expected time on leg for this runner */
+oClass::RogainingAnalysis oRunner::getRogainingAnalysis(int from, int to) const {
+  if (!Class || !Class->isRogaining())
+    return oClass::RogainingAnalysis();
+
+  if (rogainingBaseSpeed.needsUpdate(*oe))
+    oe->computeRogainingStatistics();
+
+  oClass::RogainingAnalysis rg = Class->getRogainingAnalysis(from, to, rogainingBaseSpeed.get());
+
+  int splitTime = 0;
+  int expected = rg.lostTime; // Convert "expected" to "lost
+  auto res = rogainingLegSplitPlace.find(make_pair(from, to));
+  if (res != rogainingLegSplitPlace.end()) {
+    rg.legPlace = res->second.second;
+    splitTime = res->second.first;
+  }
+  int delta = expected > 0 && splitTime > 0 ? splitTime - expected : 0;
+
+  if (delta < timeConstSecond * 5 || delta < int(rg.bestTime * 0.05))
+    delta = 0;
+
+  rg.lostTime = delta; 
+  return rg;
 }

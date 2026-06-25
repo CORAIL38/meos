@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -139,7 +139,7 @@ void MethodEditor::show(gdioutput &gdi) {
     oe->getListContainer().getListsByResultModule(tag, listIx);
     
     string udtag = DynamicResult::undecorateTag(tag);
-    gdi.addInput("Tag", gdi.widen(udtag), 20, methodCB, L"Result module identifier:");
+    gdi.addInput("Tag", gdi.widen(udtag), 20, methodCB, L"Result module identifier:").limitText(24);
     if (!listIx.empty()) {
       gdi.disableInput("Tag");
       gdi.getBaseInfo("Tag").setExtra(1);

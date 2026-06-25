@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -73,12 +73,21 @@ void oPunch::appendCodeString(string &dst) const {
     ubo[0] = 0;
 
   char bf[48];
-  if (timeConstSecond > 1 && punchTime != -1) {
+  if (timeConstSecond == 10 && punchTime != -1) {
     if (punchTime >= 0)
       sprintf_s(bf, 32, "%d-%d.%d%s%s;", type, punchTime / timeConstSecond,
         punchTime % timeConstSecond, ubf, ubo);
     else {
       sprintf_s(bf, 32, "%d--%d.%d%s%s;", type, (-punchTime) / timeConstSecond, 
+        (-punchTime) % timeConstSecond, ubf, ubo);
+    }
+  }
+  else if (timeConstSecond == 100 && punchTime != -1) {
+    if (punchTime >= 0)
+      sprintf_s(bf, 32, "%d-%d.%02d%s%s;", type, punchTime / timeConstSecond,
+        punchTime % timeConstSecond, ubf, ubo);
+    else {
+      sprintf_s(bf, 32, "%d--%d.%02d%s%s;", type, (-punchTime) / timeConstSecond,
         (-punchTime) % timeConstSecond, ubf, ubo);
     }
   }
@@ -105,10 +114,21 @@ void oPunch::decodeString(const char *s) {
     if (timeConstSecond > 1 && *s == '.') {
       ++s;
       int tenth = *s - '0';
-      while ((*s >= '0' && *s <= '9')) // Eat more decimal digits (unused)
-        ++s;
+      int hundredth = -1;
 
-      if (tenth > 0 && tenth < 10) {
+      if (timeConstSecond > 10)
+        tenth *= 10;
+
+      while ((*s >= '0' && *s <= '9')) { // Eat more decimal digits (unused)
+        ++s;
+        if (hundredth == -1) {
+          hundredth = *s - '0';
+          if (timeConstSecond >= 100 && hundredth >= 0 && hundredth < 10)
+            tenth += hundredth;
+        }
+      }
+
+      if (tenth > 0 && tenth < timeConstSecond) {
         if (t >= 0 && *timeS != '-')
           punchTime = timeConstSecond * t + tenth;
         else
@@ -329,4 +349,8 @@ int oPunch::getOriginalTime() const {
   if (punchUnit > 0)
     return pt + oe->getUnitAdjustment(oPunch::SpecialPunch(type), punchUnit);
   return pt + tTimeAdjust.first; // Adjustment "wrong time" at control
+}
+
+const oControl *oPunch::getRogainingControl(const oCourse &crs) const {
+  return crs.getControl(tRogainingIndex);
 }

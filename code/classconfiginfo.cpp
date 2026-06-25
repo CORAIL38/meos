@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -50,7 +50,7 @@ void ClassConfigInfo::clear() {
 bool ClassConfigInfo::empty() const {
   return individual.empty() && rogainingClasses.empty() 
     && relay.empty() && patrol.empty() 
-    && raceNStart.empty() && rogainingTeam.empty();
+    && raceNStart.empty() && rogainingTeam.empty() && rogainingPatrol.empty();
 }
 
 void ClassConfigInfo::getIndividual(set<int> &sel, bool forStartList) const {
@@ -91,6 +91,9 @@ void ClassConfigInfo::getRogainingTeam(set<int> &sel) const {
   sel.insert(rogainingTeam.begin(), rogainingTeam.end());
 }
 
+void ClassConfigInfo::getRogainingPatrol(set<int> &sel) const {
+  sel.insert(rogainingPatrol.begin(), rogainingPatrol.end());
+}
 void ClassConfigInfo::getRaceNStart(int race, set<int> &sel) const {
   if (size_t(race) < raceNStart.size() && !raceNStart[race].empty())
     sel.insert(raceNStart[race].begin(), raceNStart[race].end());
@@ -208,7 +211,10 @@ void oEvent::getClassConfigurationInfo(ClassConfigInfo &cnf) const
       cnf.timeStart[0].push_back(it->getId());
     }
     else if ((ct == oClassPatrol || ct == oClassRelay) && it->isRogaining()) {
-      cnf.rogainingTeam.push_back(it->getId());
+      if (it->getResultModule() == nullptr)
+        cnf.rogainingPatrol.push_back(it->getId());
+      else
+        cnf.rogainingTeam.push_back(it->getId());
     }
     else if (ct == oClassPatrol)
       cnf.patrol.push_back(it->getId());
@@ -266,7 +272,7 @@ void oEvent::getClassConfigurationInfo(ClassConfigInfo &cnf) const
       cnf.hasRentedCard = true;
     }
     RunnerStatus st = rit->getStatus();
-    if (st != StatusUnknown && st != StatusDNS && st != StatusNotCompetiting)
+    if (st != StatusUnknown && st != StatusDNS && st != StatusNotCompeting)
       cnf.results = true;
 
     if (rit->getStartTime() > 0)

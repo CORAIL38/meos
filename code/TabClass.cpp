@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -1137,6 +1137,7 @@ int TabClass::multiCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
           pc->synchronize();
           oe->checkOrderIdMultipleCourses(cid);
 
+          updateFairForking(gdi, pc);
           setLockForkingState(gdi, *pc);
         }
       }
@@ -1166,6 +1167,7 @@ int TabClass::multiCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
 
 
           setLockForkingState(gdi, *pc);
+          updateFairForking(gdi, pc);
         }
       }
       
@@ -1191,6 +1193,8 @@ int TabClass::multiCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
           pc->moveStageCourse(currentStage, ix, off);
           pc->synchronize();
           pc->fillStageCourses(gdi, currentStage, "StageCourses");
+
+          updateFairForking(gdi, pc);
           gdi.selectItemByIndex("StageCourses", ix + off);
         }
       }
@@ -1880,9 +1884,14 @@ int TabClass::classCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       }
       oEvent::DrawMethod method = (oEvent::DrawMethod)gdi.getSelectedItem("Method").first;
    
-      int baseInterval = convertAbsoluteTimeMS(minInterval) / 2;
+      int interval = convertAbsoluteTimeMS(minInterval);
+      int baseInterval;
+      if (interval > timeConstMinute && (interval % timeConstMinute) == 0)
+        baseInterval = timeConstMinute;
+      else
+        baseInterval = interval / 2;
       
-      if (baseInterval<1 || baseInterval>60 * 60 || baseInterval == NOTIME)
+      if (baseInterval<1 || baseInterval > timeConstHour || baseInterval == NOTIME)
         throw meosException("Ogiltigt minimalt intervall.");
 
       int iFirstStart = oe->getRelativeTime(firstStart);
@@ -2058,8 +2067,8 @@ int TabClass::classCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
         if ( res != cInfoCache.end() ) {
           ClassInfo &ci = drawInfo.classes[cid] = res->second;
           ci.fixedInterval = 0;
-          ci.nVacantSpecified = false;
-          ci.nExtraSpecified = false;
+          ci.nVacantLoaded = false;
+          ci.nExtraLoaded = false;
         }
         else
           drawInfo.classes[cid] = ClassInfo(oe->getClass(cid));
@@ -2086,10 +2095,27 @@ int TabClass::classCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       }
 
       gdi.enableEditControls(false);
+
+      int consistentStart = 0;
+      wstring startName;
+      for (auto &[id, cls] : drawInfo.classes) {
+        const wstring &strt = cls.pc->getStart();
+        if (startName.empty() && consistentStart == 0) {
+          startName = strt;
+          consistentStart = 1; // Defined and consistent
+        }
+        else if (consistentStart == 1 && strt != startName)
+          consistentStart = 2; // Not consistent
+      }
+
+      if (consistentStart == 1)
+        drawInfo.startName = startName;
+      else
+        drawInfo.startName.clear();
+
       vector<pair<int, wstring>> outLines;
       oe->optimizeStartOrder(outLines, drawInfo, cInfo);
       
-
       gdi.setRestorePoint("draw_info");
       gdi.dropLine(2);
       int cx = gdi.getCX();
@@ -2237,6 +2263,8 @@ int TabClass::classCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
     else if (bi.id == "DrawAdjust") {
       readClassSettings(gdi, true);
       gdi.restore("ReadyToDistribute");
+      drawInfo.changedVacancyInfo = false;
+      drawInfo.changedExtraInfo = false;
       vector<pair<int, wstring>> outLines;
       oe->optimizeStartOrder(outLines, drawInfo, cInfo);
       for (auto &ol : outLines)
@@ -4166,8 +4194,38 @@ void TabClass::save(gdioutput &gdi, bool skipReload)
 
   if (gdi.hasWidget("LockStartList")) {
     bool locked = gdi.isChecked("LockStartList");
-    if (pc->getParentClass())
+    if (pc->getParentClass()) {
+      if (locked && !pc->lockedClassAssignment()) {
+        bool adjustStartNo = false;
+        vector<pRunner> rList;
+        oe->getRunners(pc->getId(), -1, rList);
+        if (pc->hasTrueMultiCourse()) {
+          bool needAdjust = false;
+          set<int> sno;
+          for (pRunner r : rList)
+            sno.insert(r->getStartNo());
+
+          if (sno.size() != rList.size() || (*sno.begin() + rList.size()) != *sno.rbegin()) {
+            adjustStartNo = true;
+
+            if (!gdi.ask(L"Vill du justera tilldelningen av gafflingar i klassen nu?"))
+              adjustStartNo = false;
+          }
+          //sort(sno.begin(), sno.end())
+        }
+
+        if (adjustStartNo) {
+          oe->sortRunners(ClassStartTimeClub, rList);
+          int no = 1;
+          for (pRunner r : rList) {
+            r->synchronize(false);
+            r->setStartNo(no++, oBase::ChangeType::Update);
+            r->synchronize(true);
+          }
+        }
+      }
       pc->lockedClassAssignment(locked);
+    }
   }
 
   if (gdi.hasWidget("Courses")) {
@@ -4318,6 +4376,9 @@ bool TabClass::loadPage(gdioutput &gdi)
     gdi.addTable(oClass::getTable(oe), xp, gdi.scaleLength(30));
     return true;
   }
+
+  if (ClassId != 0 && !oe->getClass(ClassId))
+    ClassId = 0;
 
   if (showForkingGuide) {
     try {
@@ -4566,8 +4627,8 @@ bool TabClass::loadPage(gdioutput &gdi)
     func.emplace_back("StartGroups", "Startgrupper", true);
 
   RECT funRect;
-  funRect.right = gdi.getCX() - 7;
-  funRect.top = gdi.getCY() - 2;
+  funRect.right = gdi.getCX() - gdi.scaleLength(7);
+  funRect.top = gdi.getCY() - gdi.scaleLength(2);
   funRect.left = 0;
 
   gdi.dropLine(0.5);
@@ -5426,7 +5487,7 @@ void TabClass::defineForking(gdioutput &gdi, bool clearSettings) {
   }
 
   gdi.dropLine();
-  gdi.addInput("MaxForkings", L"100", 5, nullptr, L"Max antal gaffllingsvarianter att skapa:",
+  gdi.addInput("MaxForkings", L"100", 5, nullptr, L"Max antal gafflingsvarianter att skapa:",
     L"Det uppskattade antalet startade lag i klassen är ett lämpligt värde.");
   gdi.dropLine();
   gdi.fillRight();

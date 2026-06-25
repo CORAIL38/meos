@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -56,6 +56,8 @@ class TabCompetition :
   wstring defaultName;
   wstring defaultPwd;
   wstring defaultPort;
+
+  bool meosIdSelected = false;
 
   void copyrightLine(gdioutput &gdi) const;
   void loadAboutPage(gdioutput &gdi) const;
@@ -133,7 +135,7 @@ class TabCompetition :
   void selectExportSplitOptions(gdioutput& gdi);
 
   void showSelectId(std::pair<bool, bool>& priSecondId, gdioutput& gdi);
-  pair<string, string> TabCompetition::getPreferredIdTypes(gdioutput& gdi);
+  tuple<string, string, bool> TabCompetition::getPreferredIdTypes(gdioutput& gdi);
 
   void saveExtraFields(gdioutput& gdi, oEvent::ExtraFieldContext type);
 

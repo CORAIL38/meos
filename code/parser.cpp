@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,7 +22,6 @@
 #include "stdafx.h"
 
 #include <vector>
-#include <set>
 #include <map>
 #include "parser.h"
 #include "meosException.h"
@@ -1258,11 +1257,13 @@ void Parser::ArrayValueNode::assignVector(const Parser &parser, const vector<int
   parser.storeVariable(expr, index->evaluate(parser), in_value[0]);
 }
 
-void Parser::declareSymbol(const char *name, const string &desc, bool isVector, bool isMatrix) {
+void Parser::declareSymbol(const char *name, const string &desc, 
+                           bool isVector, bool isMatrix, bool deprecated) {
   assert(symb.count(name) == 0 || (symb[name].isVector == isVector && symb[name].isMatrix == isMatrix));
   symb[name].desc = desc;
   symb[name].isVector = isVector;
   symb[name].isMatrix = isMatrix;
+  symb[name].deprecated = deprecated;
 }
 
 bool Parser::isMatrix(const string &input) const {
@@ -1354,7 +1355,10 @@ void Parser::takeVariable(const char*name, vector<int> &val) const {
 
 void Parser::getSymbols(vector< pair<wstring, size_t> > &symbOut) const {
   int iter = 0;
-  for(map<string, Symbol>::const_iterator it = symb.begin(); it != symb.end(); ++it) {
+  for(auto it = symb.begin(); it != symb.end(); ++it) {
+    if (it->second.deprecated)
+      continue;
+
     if (it->second.isMatrix)
       symbOut.push_back(make_pair(gdi_main->widen(it->first) + L"[][]\t" + lang.tl(it->second.desc), iter++));
     else if (it->second.isVector)
@@ -1366,7 +1370,10 @@ void Parser::getSymbols(vector< pair<wstring, size_t> > &symbOut) const {
 
 void Parser::getSymbolInfo(int ix, wstring &name, wstring &desc) const {
   int iter = 0;
-  for(map<string, Symbol>::const_iterator it = symb.begin(); it != symb.end(); ++it) {
+  for(auto it = symb.begin(); it != symb.end(); ++it) {
+    if (it->second.deprecated)
+      continue;
+
     if (ix == iter++) {
       if (it->second.isMatrix)
         name = gdi_main->widen(it->first) + L"[][]";
@@ -1381,7 +1388,6 @@ void Parser::getSymbolInfo(int ix, wstring &name, wstring &desc) const {
   }
   throw meosException("Internal error");
 }
-
 
 static void assertEq(int a, int b) {
   if (a != b) {

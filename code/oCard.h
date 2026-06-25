@@ -1,17 +1,11 @@
 ﻿// oCard.h: interface for the oCard class.
 //
 //////////////////////////////////////////////////////////////////////
-
-#if !defined(AFX_OCARD_H__674EAB76_A232_4E44_A9B4_C52F6A04D7CF__INCLUDED_)
-#define AFX_OCARD_H__674EAB76_A232_4E44_A9B4_C52F6A04D7CF__INCLUDED_
-
-#if _MSC_VER > 1000
 #pragma once
-#endif // _MSC_VER > 1000
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,17 +28,20 @@
 #include "oBase.h"
 #include "oPunch.h"
 
-#include "xmlparser.h"
-
 typedef list<oPunch> oPunchList;
 
 class gdioutput;
 class oCard;
 typedef oCard *pCard;
+class xmlparser;
+class xmlobject;
 
 class oCourse;
 class oRunner;
 typedef oRunner *pRunner;
+
+class oControl;
+typedef oControl* pControl;
 
 struct SICard;
 class Table;
@@ -72,6 +69,8 @@ protected:
   mutable string punchString;
 
 public:
+  /** Get start time from a punch (or -1)*/
+  int getStartTime(int ptype) const;
 
   int getStartPunchCode() const;
   int getFinishPunchCode() const;
@@ -91,6 +90,9 @@ public:
   wstring getBatteryDate() const;
 
   static const shared_ptr<Table> &getTable(oEvent *oe);
+
+  /** Returns true if the order of punches is unexpected (wrt time)*/
+  bool unexpectedOrder(int startTIme) const;
 
   // Returns true if the card was constructed from punches.
   bool isConstructedFromPunches() {return ConstructedFromPunches == readId;}
@@ -128,6 +130,16 @@ public:
 
   bool fillPunches(gdioutput &gdi, const string &name, oCourse *crs);
 
+  /** Get a (candidate) incorrect punch for the specified missing control on the course */
+  pair<int, pControl> getWrongPunch(const oCourse &crs, const oControl &ctrl);
+
+  static int getUnmatchedPunchId(int punchIx) {
+    return -(100 + punchIx);
+  }
+
+  static int getUnmatchedPunchIndex(int punchId) {
+    return -punchId - 100;
+  }
   enum class PunchOrigin {
     Unknown,
     Original,
@@ -174,5 +186,3 @@ public:
   friend class MeosSQL;
   friend class oListInfo;
 };
-
-#endif // !defined(AFX_OCARD_H__674EAB76_A232_4E44_A9B4_C52F6A04D7CF__INCLUDED_)

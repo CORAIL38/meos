@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,14 +41,30 @@ struct SpeakerString {
                                            timeout(timeoutIn), color(colorDefault) {}
 };
 
-class oSpeakerObject
-{
+class oSpeakerObject {
 public:
   struct RunningTime {
     void reset() { time = 0; preliminary = 0; }
-    int time;
-    int preliminary;
-    RunningTime() : time(0), preliminary(0) {}
+    int time = 0;
+    int preliminary = 0;
+    RunningTime() = default;
+  };
+
+  struct ResultAtControl {
+    RunningTime runningTime;
+    RunningTime runningTimeLeg;
+    RunningTime runningTimeSinceLast;
+
+    int place = 0;
+    int parallelScore = 0;
+    RunnerStatus status = StatusUnknown;
+
+    bool hasResult() const { return status == StatusOK || status == StatusUnknown && runningTime.time > 0; }
+    bool isIncomming() const { return status == StatusUnknown && runningTime.time <= 0; }
+
+    // For parallel legs
+    int runnersFinishedLeg = 0;
+    bool restarted = false;
   };
 
   void reset() {
@@ -59,50 +75,50 @@ public:
     resultRemark.clear();
     club.clear();
     startTimeS.clear();
-    status = StatusUnknown;
     finishStatus = StatusUnknown;
     useSinceLast = 0;
-    runningTime.reset();
-    runningTimeLeg.reset();
-    runningTimeSinceLast.reset();
+    result.clear();
   }
-  oRunner *owner;
+
+  size_t size() const {
+    return result.size();
+  }
+
+  const ResultAtControl& operator[](size_t ix) const {
+    return result[ix];
+  }
+
+  oRunner *owner = nullptr;
   wstring bib;
   vector<wstring> names;
   vector<wstring> outgoingnames;
   string resultRemark;
   wstring club;
   wstring startTimeS;
+  vector<ResultAtControl> result;
 
-  bool useSinceLast;
-  int place;
-  int parallelScore;
+  int compareResultIndex = -1;
+  int nextPreliminaryTime = -1;
 
   // For parallel legs
-  int runnersFinishedLeg;
-  int runnersTotalLeg;
+  int runnersTotalLeg = 0;
 
-  RunnerStatus status;
-  RunnerStatus finishStatus;
+  RunnerStatus finishStatus = StatusUnknown;
 
-  bool hasResult() const { return status == StatusOK || status == StatusUnknown && runningTime.time > 0; }
-  bool isIncomming() const { return status == StatusUnknown && runningTime.time <= 0; }
-
-  RunningTime runningTime;
-  RunningTime runningTimeLeg;
-  RunningTime runningTimeSinceLast;
-
-  bool isRendered;
-  int priority;
-  bool missingStartTime;
-
+  bool hasResult(int where) const { return where < result.size() && result[where].hasResult(); }
+  bool isIncomming(int where) const { return where < result.size() && result[where].isIncomming(); }
+  
   // In seconds. Negative if undefined.
-  int timeSinceChange;
+  int timeSinceChange = -1;
 
-  oSpeakerObject() : owner(0), place(0), parallelScore(0), status(StatusUnknown),
-                     finishStatus(StatusUnknown), isRendered(false),
-                     priority(0), missingStartTime(false), timeSinceChange(-1), useSinceLast(false),
-                     runnersFinishedLeg(0), runnersTotalLeg(0) {}
+  int priority = 0;
+  bool missingStartTime = false;
+  bool isRendered = false;
+  bool useSinceLast = false;
 
+  bool highlight(int timeToHighlightSecond) const {
+    return timeSinceChange < timeToHighlightSecond * timeConstSecond && timeSinceChange >= 0;
+  }
+
+  oSpeakerObject() = default;
 };
-

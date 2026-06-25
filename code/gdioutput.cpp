@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,16 +23,14 @@
 // gdioutput.cpp: implementation of the gdioutput class.
 //
 //////////////////////////////////////////////////////////////////////
+#define _USE_MATH_DEFINES
 
 #include "stdafx.h"
 #include "gdioutput.h"
 #include "gdiconstants.h"
 #include "meosException.h"
-#include "resource.h"
 
 #include "process.h"
-
-#include "meos.h"
 
 #include <commctrl.h>
 #include <commdlg.h>
@@ -40,14 +38,13 @@
 #include <objbase.h>
 #include <shlobj.h>
 #include <cassert>
+
 #include <cmath>
+
 #include <sstream>
 
 #include "meos_util.h"
 #include "Table.h"
-
-#define _USE_MATH_DEFINES
-#include "math.h"
 
 #include "Localizer.h"
 
@@ -59,17 +56,9 @@
 #include "animationdata.h"
 #include "image.h"
 #include "autocomplete.h"
+#include "maprenderer.h"
 
 extern Image image;
-//////////////////////////////////////////////////////////////////////
-// Construction/Destruction
-//////////////////////////////////////////////////////////////////////
-
-
-//Fulhack...
-#ifndef IDC_HAND
-  #define IDC_HAND MAKEINTRESOURCE(32649)
-#endif
 
 //#define DEBUGRENDER
 
@@ -151,7 +140,7 @@ void gdioutput::constructor(double _scale)
   backgroundImage = -1;
 
   toolbar = 0;
-  initCommon(_scale, L"Arial");
+  initCommon(_scale, L"Segoe UI");
 
   OffsetY=0;
   OffsetX=0;
@@ -177,8 +166,7 @@ void gdioutput::constructor(double _scale)
   autoCounter = 0;
 }
 
-void gdioutput::setFont(int size, const wstring &font)
-{
+void gdioutput::setFont(int size, const wstring &font) {
   double ss = size * sqrt(size);
   double s = 1 + double(ss)*0.25;
   initCommon(s, font);
@@ -302,8 +290,7 @@ void gdioutput::scaleSize(double scale_, bool allowSmallScale, ScaleOperation op
   }
 }
 
-void gdioutput::initCommon(double _scale, const wstring &font)
-{
+void gdioutput::initCommon(double _scale, const wstring &font) {
   guiMeasure.reset();
   dbErrorState = false;
   currentFontSet = 0;
@@ -311,12 +298,14 @@ void gdioutput::initCommon(double _scale, const wstring &font)
   currentFont = font;
   deleteFonts();
   enableTables();
-  lineHeight = int(scale*14);
-
+  
   Background=CreateSolidBrush(GetSysColor(COLOR_WINDOW));
 
   fontHeightCache.clear();
   fonts[currentFont].init(scale, currentFont, L"");
+  
+  lineHeight = getFontHeight(0, currentFont) + scaleLength(0.2);
+
   updateTabFont();
 }
 
@@ -425,7 +414,7 @@ void gdioutput::fetchPrinterSettings(PrinterObject &po) const {
 }
 
 
-void gdioutput::drawBackground(HDC hDC, RECT &rc)
+void gdioutput::drawBackground(HDC hDC, RECT& rc)
 {
   if (backgroundColor1 != -1) {
     SelectObject(hDC, GetStockObject(NULL_PEN));
@@ -439,7 +428,7 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
 
   }
 
-  GRADIENT_RECT gr[1];
+  GRADIENT_RECT gr[2];
 
   SelectObject(hDC, GetStockObject(NULL_PEN));
   SelectObject(hDC, Background);
@@ -447,9 +436,9 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
   if (highContrast) {
     Rectangle(hDC, -1, -1, rc.right + 1, rc.bottom + 1);
 
-    HFONT hInfo = CreateFont(min(30, int(scale*22)), 0, 900, 900, FW_LIGHT, false,  false, false, DEFAULT_CHARSET,
-                             OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH|FF_ROMAN, L"Arial");
+    HFONT hInfo = CreateFont(min(30, int(scale * 22)), 0, 900, 900, FW_LIGHT, false, false, false, DEFAULT_CHARSET,
+      OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+      DEFAULT_PITCH | FF_ROMAN, L"Segoe UI");
 
     SelectObject(hDC, hInfo);
     RECT mrc;
@@ -457,7 +446,7 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
     mrc.right = 0;
     mrc.top = 0;
     mrc.bottom = 0;
-    DrawText(hDC, listDescription.c_str(), listDescription.length(), &mrc, DT_LEFT|DT_CALCRECT|DT_NOPREFIX);
+    DrawText(hDC, listDescription.c_str(), listDescription.length(), &mrc, DT_LEFT | DT_CALCRECT | DT_NOPREFIX);
     int height = mrc.right + mrc.right / 3;
     if (height > 0) {
       SetBkMode(hDC, TRANSPARENT);
@@ -483,19 +472,19 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
     return;
   }
   if (!hideBG) {
-    Rectangle(hDC, -1, -1, rc.right-OffsetX+1, 10-OffsetY+1);
-    Rectangle(hDC, -1, -1, 11-OffsetX, rc.bottom+1);
-    Rectangle(hDC, MaxX+10-OffsetX, 0, rc.right+1, rc.bottom+1);
-    Rectangle(hDC, 10-OffsetX, MaxY+13-OffsetY, MaxX+11-OffsetX, rc.bottom+1);
+    Rectangle(hDC, -1, -1, rc.right - OffsetX + 1, 10 - OffsetY + 1);
+    Rectangle(hDC, -1, -1, 11 - OffsetX, rc.bottom + 1);
+    Rectangle(hDC, MaxX + 10 - OffsetX, 0, rc.right + 1, rc.bottom + 1);
+    Rectangle(hDC, 10 - OffsetX, MaxY + 13 - OffsetY, MaxX + 11 - OffsetX, rc.bottom + 1);
   }
   if (dbErrorState) {
     SelectObject(hDC, GetStockObject(DC_BRUSH));
     SetDCBrushColor(hDC, RGB(255, 100, 100));
-    Rectangle(hDC, -1, -1, rc.right+1, rc.bottom+1);
+    Rectangle(hDC, -1, -1, rc.right + 1, rc.bottom + 1);
 
-    HFONT hInfo = CreateFont(30, 0, 900, 900, FW_BOLD, false,  false, false, DEFAULT_CHARSET,
-                             OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH|FF_ROMAN, L"Arial");
+    HFONT hInfo = CreateFont(30, 0, 900, 900, FW_BOLD, false, false, false, DEFAULT_CHARSET,
+      OUT_TT_ONLY_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+      DEFAULT_PITCH | FF_ROMAN, L"Segoe UI");
 
     wstring err = lang.tl(L"DATABASE ERROR");
     SelectObject(hDC, hInfo);
@@ -504,7 +493,7 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
     mrc.right = 0;
     mrc.top = 0;
     mrc.bottom = 0;
-    DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT|DT_CALCRECT|DT_NOPREFIX);
+    DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT | DT_CALCRECT | DT_NOPREFIX);
     int width = mrc.bottom + mrc.bottom / 4;
     int height = mrc.right + mrc.right / 4;
     SetBkMode(hDC, TRANSPARENT);
@@ -515,86 +504,126 @@ void gdioutput::drawBackground(HDC hDC, RECT &rc)
       mrc.right = mrc.left + 1000;
       mrc.top = k - OffsetY;
       mrc.bottom = MaxY;
-      DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT|DT_NOCLIP|DT_NOPREFIX);
+      DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT | DT_NOCLIP | DT_NOPREFIX);
       mrc.left -= width;
       mrc.top -= height / 2;
-      DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT|DT_NOCLIP|DT_NOPREFIX);
+      DrawText(hDC, err.c_str(), err.length(), &mrc, DT_LEFT | DT_NOCLIP | DT_NOPREFIX);
     }
     SelectObject(hDC, GetStockObject(ANSI_FIXED_FONT));
     DeleteObject(hInfo);
   }
-/*
-  DWORD c=GetSysColor(COLOR_3DFACE);
-  double red = double(GetRValue(c)) *0.9;
-  double green = double(GetGValue(c)) * 0.85;
-  double blue = min(255.0, double(GetBValue(c)) * 1.05);
+  /*
+    DWORD c=GetSysColor(COLOR_3DFACE);
+    double red = double(GetRValue(c)) *0.9;
+    double green = double(GetGValue(c)) * 0.85;
+    double blue = min(255.0, double(GetBValue(c)) * 1.05);
 
-  if (blue<100) {
-    //Invert
-    red = 255-red;
-    green = 255-green;
-    blue = 255-blue;
-  }
+    if (blue<100) {
+      //Invert
+      red = 255-red;
+      green = 255-green;
+      blue = 255-blue;
+    }
 
-  double blue1=min(255., blue*1.3);
-  double green1=min(255., green*1.3);
-  double red1=min(255., red*1.3);
-  */
+    double blue1=min(255., blue*1.3);
+    double green1=min(255., green*1.3);
+    double red1=min(255., red*1.3);
+    */
 
-  double red = 242.0;
-  double green = 247.0;
+  double red = 244.0;
+  double green = 250.0;
   double blue = 254.0;
 
-  double blue1 = 250.0;
-  double green1 = 232.0;
-  double red1 = 223.0;
+  double red1 = 232.0;
+  double green1 = 235.0;
+  double blue1 = 253.0;
 
   TRIVERTEX vert[2];
   if (hideBG) {
-    vert [0] .x      = 0;
-    vert [0] .y      = 0;
+    vert[0].x = 0;
+    vert[0].y = 0;
   }
   else {
-    vert [0] .x      = 10-OffsetX;
-    vert [0] .y      = 10-OffsetY;
+    vert[0].x = 10 - OffsetX;
+    vert[0].y = 10 - OffsetY;
   }
-  vert [0] .Red    = 0xff00&DWORD(red1*256);
-  vert [0] .Green  = 0xff00&DWORD(green1*256);
-  vert [0] .Blue   = 0xff00&DWORD(blue1*256);
-  vert [0] .Alpha  = 0x0000;
+  vert[0].Red = 0xff00 & DWORD(red1 * 256);
+  vert[0].Green = 0xff00 & DWORD(green1 * 256);
+  vert[0].Blue = 0xff00 & DWORD(blue1 * 256);
+  vert[0].Alpha = 0x0000;
 
   if (hideBG) {
-    vert [1] .x      = rc.right + 1;
-    vert [1] .y      = rc.bottom + 1;
+    vert[1].x = rc.right + 1;
+    vert[1].y = rc.bottom + 1;
   }
   else {
-    vert [1] .x      = MaxX+10-OffsetX;
-    vert [1] .y      = MaxY+13-OffsetY;
+    vert[1].x = MaxX + 10 - OffsetX;
+    vert[1].y = MaxY + 13 - OffsetY;
   }
-  vert [1] .Red    = 0xff00&DWORD(red*256);
-  vert [1] .Green  = 0xff00&DWORD(green*256);
-  vert [1] .Blue   = 0xff00&DWORD(blue*256);
-  vert [1] .Alpha  = 0x0000;
+  vert[1].Red = 0xff00 & DWORD(red * 256);
+  vert[1].Green = 0xff00 & DWORD(green * 256);
+  vert[1].Blue = 0xff00 & DWORD(blue * 256);
+  vert[1].Alpha = 0x0000;
 
-  gr[0].UpperLeft=0;
-  gr[0].LowerRight=1;
-
-
-  if (MaxY>max(800, MaxX) || hideBG)
-    GradientFill(hDC,vert, 2, gr, 1,GRADIENT_FILL_RECT_H);
-  else
-    GradientFill(hDC,vert, 2, gr, 1,GRADIENT_FILL_RECT_V);
+  gr[0].UpperLeft = 0;
+  gr[0].LowerRight = 1;
+  TRIVERTEX vert0 = vert[0];
+  TRIVERTEX vert1 = vert[1];
 
   if (!hideBG) {
-    SelectObject(hDC, GetSysColorBrush(COLOR_3DSHADOW));
+    int bWidth = scaleLength(5);
+    double red2 = 142;
+    double green2 = 147;
+    double blue2 = 249;
 
-    Rectangle(hDC, vert[0].x+3, vert[1].y, vert[1].x+1, vert[1].y+3);
-    Rectangle(hDC, vert[1].x, vert[0].y+3, vert[1].x+3, vert[1].y+3);
+    TRIVERTEX vertB[4];
+    vertB[0] = vert[0];
+    vertB[1] = vert[1];
+    vertB[1].x = vertB[0].x + bWidth;
+    vertB[0].Red = 0xff00 & DWORD(red2 * 256);
+    vertB[0].Green = 0xff00 & DWORD(green2 * 256);
+    vertB[0].Blue = 0xff00 & DWORD(blue2 * 256);
+    vertB[1].Red = 0xff00 & DWORD(254 * 256);
+    vertB[1].Green = 0xff00 & DWORD(254 * 256);
+    vertB[1].Blue = 0xff00 & DWORD(252 * 256);
+
+    vertB[2] = vert[0];
+    vertB[2].x = vertB[0].x + bWidth;
+    vertB[2].Red = vertB[1].Red;
+    vertB[2].Green = vertB[1].Green;
+    vertB[2].Blue = vertB[1].Blue;
+    vertB[3] = vert[1];
+    vertB[3].x = vertB[0].x + bWidth*2;
+    vertB[3].Red = vert[0].Red;
+    vertB[3].Green = vert[0].Green;
+    vertB[3].Blue= vert[0].Blue;
+
+    gr[1].UpperLeft = 2;
+    gr[1].LowerRight = 3;
+    GradientFill(hDC, vertB, 4, gr, 2, GRADIENT_FILL_RECT_H);
+    vert[0].x += bWidth * 2;
+  }
+
+  if (MaxY > max(800, MaxX) || hideBG)
+    GradientFill(hDC, vert, 2, gr, 1, GRADIENT_FILL_RECT_H);
+  else
+    GradientFill(hDC, vert, 2, gr, 1, GRADIENT_FILL_RECT_V);
+
+  if (!hideBG) {
+    SelectObject(hDC, GetStockObject(DC_BRUSH));
+    SelectObject(hDC, GetStockObject(NULL_PEN));
+    int redS = int(red * 0.8);
+    int greenS = int(green * 0.8);
+    int blueS = int(blue * 0.8);
+    int width = scaleLength(3);
+    SetDCBrushColor(hDC, RGB(redS, greenS, blueS));
+    Rectangle(hDC, vert0.x + width, vert1.y, vert1.x + 1, vert1.y + width);
+    Rectangle(hDC, vert1.x, vert0.y + width, vert1.x + width, vert1.y + width);
 
     SelectObject(hDC, GetStockObject(NULL_BRUSH));
     SelectObject(hDC, GetStockObject(DC_PEN));
-    SetDCPenColor(hDC, RGB(DWORD(red*0.4), DWORD(green*0.4), DWORD(blue*0.4)));
-    Rectangle(hDC, vert[0].x, vert[0].y, vert[1].x, vert[1].y);
+    SetDCPenColor(hDC, RGB(DWORD(red * 0.4), DWORD(green * 0.4), DWORD(blue * 0.4)));
+    Rectangle(hDC, vert0.x, vert0.y, vert1.x, vert1.y);
   }
 }
 
@@ -653,6 +682,9 @@ void gdioutput::draw(HDC hDC, RECT& rc, RECT& drawArea) {
     RenderString(*imgTL, hDC);
   }
 
+  if (renderMap)
+    renderMap->renderDecoration(hDC, *this);
+
   if (!renderOptimize || itTL == TL.end()) {
 #ifdef DEBUGRENDER
     //if (breakRender)
@@ -706,7 +738,13 @@ void gdioutput::renderRectangle(HDC hDC, RECT *clipRegion, const RectangleInfo &
   }
   RECT rect_rc=ri.rc;
   OffsetRect(&rect_rc, -OffsetX, -OffsetY);
-  Rectangle(hDC, rect_rc.left, rect_rc.top, rect_rc.right, rect_rc.bottom);
+  if (rect_rc.left == rect_rc.right || rect_rc.top == rect_rc.bottom) {
+    MoveToEx(hDC, rect_rc.left, rect_rc.top, nullptr);
+    LineTo(hDC, rect_rc.right, rect_rc.bottom);
+  }
+  else {
+    Rectangle(hDC, rect_rc.left, rect_rc.top, rect_rc.right, rect_rc.bottom);
+  }
   if (ri.color == colorTransparent)
     SelectObject(hDC, GetStockObject(DC_BRUSH));
 }
@@ -889,7 +927,10 @@ TimerInfo:: ~TimerInfo() {
 }
 
 TextInfo& gdioutput::addImage(const string& id, int yp, int xp, int format, 
-  const wstring& imageId, int width, int height, GUICALLBACK cb) {
+                              const wstring& imageId, int width, int height,
+                              int offsetX, int offsetY,
+                              int srcWidth, int srcHeight,
+                              GUICALLBACK cb) {
   bool skipBBCalc = (format & skipBoundingBox) == skipBoundingBox;
   format &= ~skipBoundingBox;
 
@@ -902,33 +943,81 @@ TextInfo& gdioutput::addImage(const string& id, int yp, int xp, int format,
 
   TI.id = id;
   TI.format = format | textImage;
-  TI.xp = xp;
-  TI.yp = yp;
   TI.text = L"L" + imageId;
   TI.callBack = cb;
+
+  uint64_t imgId = _wcstoui64(imageId.c_str(), nullptr, 10);
+  int rwidth = image.getWidth(imgId);
+  int rheight = image.getHeight(imgId);
   
   if (width == 0 || height == 0) {
-    uint64_t imgId = _wcstoui64(imageId.c_str(), nullptr, 10);
-    int rwidth = image.getWidth(imgId);
-    int rheight = image.getHeight(imgId);
-
     if (width == 0 && height == 0) {
       width = rwidth;
       height = rheight;
     }
-    else if (height == 0) 
+    else if (height == 0)
       height = (width * rheight) / rwidth;
-    else
+      else
       width = (height * rwidth) / rheight;
   }
+  
+   double scaleX = double(height) / double(rheight), scaleY = double(width)/double(rwidth);
 
-    //if (skipBBCalc) {
+  TI.srcRect.left = offsetX;
+  /*if (offsetX < 0) {
+    TI.srcRect.left = 0;
+    xp -= offsetX * scaleX;
+    width += offsetX * scaleX;
+  }*/
+
+  TI.srcRect.top = offsetY;
+  if(srcWidth < 0)
+    TI.srcRect.right = offsetX + rwidth;
+  else
+    TI.srcRect.right = offsetX + srcWidth;
+
+  if (srcHeight < 0)
+    TI.srcRect.bottom = offsetY + rheight;
+  else
+    TI.srcRect.bottom = offsetY + srcHeight;
+
+
+  /*if (offsetY < 0) {
+    TI.srcRect.top = 0;
+    yp -= offsetY * scaleY;
+    height += offsetY * scaleY;
+  }*/
+  
+/*  if (srcWidth < 0)
+    TI.srcRect.right = rwidth;
+  else {
+    TI.srcRect.right = offsetX + srcWidth;
+    if (TI.srcRect.right > rwidth) {
+      int extraX = TI.srcRect.right - rwidth;
+      TI.srcRect.right = rwidth;
+      width = max<int>(0, width - scaleX*extraX);// int(width * (double(srcWidth - extraX) / double(srcWidth)));
+    }
+  }
+
+  if (srcHeight < 0)
+    TI.srcRect.bottom = rheight;
+  else {
+    TI.srcRect.bottom = offsetY + srcHeight;
+    if (TI.srcRect.bottom > rheight) {
+      int extraY = TI.srcRect.bottom - rheight;
+      TI.srcRect.bottom = rheight;
+      height = max<int>(0, width - scaleY * extraY);// int(height * (double(srcHeight - extraY) / double(srcHeight)));
+    }
+  }
+  */
+  TI.xp = xp;
+  TI.yp = yp;
   TI.textRect.left = xp;
   TI.textRect.top = yp;
   TI.textRect.right = xp + width;
   TI.textRect.bottom = yp + height;
   TI.realWidth = width;
-  
+
   FlowDirection oldDir = flowDirection;
 
   if (format & imageNoUpdatePos)
@@ -1172,18 +1261,19 @@ ButtonInfo &gdioutput::addButton(int x, int y, const string &id, const string &t
   return addButton(x,y, id, widen(text), cb, widen(tooltip));
 }
 
-ButtonInfo &gdioutput::addButton(int x, int y, const string &id, const wstring &text, GUICALLBACK cb,
-  const wstring &tooltip)
+ButtonInfo& gdioutput::addButton(int x, int y, const string& id, const wstring& text, GUICALLBACK cb,
+  const wstring& tooltip)
 {
   HANDLE bm = 0;
   int width = 0;
   if (text[0] == '@') {
-    HINSTANCE hInst = GetModuleHandle(0);    int ir = _wtoi(text.c_str() + 1);
+    HINSTANCE hInst = GetModuleHandle(0);
+    int ir = _wtoi(text.c_str() + 1);
     bm = LoadBitmap(hInst, MAKEINTRESOURCE(ir));
 
     SIZE size;
     size.cx = 24;
-    width = size.cx+4;
+    width = size.cx + 4;
   }
   else {
     SIZE size;
@@ -1194,8 +1284,8 @@ ButtonInfo &gdioutput::addButton(int x, int y, const string &id, const wstring &
     if (tts > 2 && ttext[0] == '<' && ttext[1] == '<') {
       ttext = L"◀" + ttext.substr(2);
     }
-    else if (tts > 2 && ttext[tts-1] == '>' && ttext[tts-2] == '>') {
-      ttext = ttext.substr(0, tts-2) + L"▶";
+    else if (tts > 2 && ttext[tts - 1] == '>' && ttext[tts - 2] == '>') {
+      ttext = ttext.substr(0, tts - 2) + L"▶";
     }
     if (lang.capitalizeWords())
       capitalizeWords(ttext);
@@ -1206,7 +1296,7 @@ ButtonInfo &gdioutput::addButton(int x, int y, const string &id, const wstring &
       width = max<int>(width, scaleLength(75));
   }
 
-  ButtonInfo &bi=addButton(x, y, width, id, text, cb, tooltip, false, false);
+  ButtonInfo& bi = addButton(x, y, width, id, text, cb, tooltip, false, false);
 
   if (bm != 0) {
     SendMessage(bi.hWnd, BM_SETIMAGE, IMAGE_BITMAP, LPARAM(bm));
@@ -1250,8 +1340,7 @@ ButtonInfo& gdioutput::addButton(int x, int y, int w, const string& id,
   bool absPos, bool hasState) {
   return addButton(x, y, w, getButtonHeight(), id, text,
     gdiFonts::normalText, cb, toolTip, absPos, hasState);
-  }
-
+}
 
 ButtonInfo& gdioutput::addButton(int x, int y, int width, int height,
   const string& id, const wstring& text,
@@ -1303,7 +1392,50 @@ ButtonInfo& gdioutput::addButton(int x, int y, int width, int height,
   bi.text = ttext;
   bi.id = id;
   bi.callBack = cb;
-  bi.AbsPos = absPos;
+  bi.absPos = absPos;
+
+  if (tooltip.length() > 0)
+    addToolTip(id, tooltip, bi.hWnd);
+
+  BI.push_back(bi);
+  biByHwnd[bi.hWnd] = &BI.back();
+
+  FocusList.push_back(bi.hWnd);
+  return BI.back();
+}
+
+ButtonInfo& gdioutput::addImageButton(int x, int y, int width, int height,
+                                      const string &id, int imgId, GUICALLBACK cb,
+                                      const wstring& tooltip,
+                                      bool absPos, bool hasState) {
+  int style = hasState ? BS_CHECKBOX | BS_PUSHLIKE : BS_PUSHBUTTON;
+  style |= BS_BITMAP;
+
+  ButtonInfo bi;
+  if (absPos) {
+    bi.hWnd = CreateWindow(L"BUTTON", L"...", WS_TABSTOP | WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | style | BS_NOTIFY,
+      x - OffsetX, y, width, height, hWndTarget, NULL,
+      (HINSTANCE)GetWindowLongPtr(hWndTarget, GWLP_HINSTANCE), NULL);
+  }
+  else {
+    bi.hWnd = CreateWindow(L"BUTTON", L"...", WS_TABSTOP | WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS | style | BS_NOTIFY,
+      x - OffsetX, y - OffsetY - 1, width, height, hWndTarget, NULL,
+      (HINSTANCE)GetWindowLongPtr(hWndTarget, GWLP_HINSTANCE), NULL);
+  }
+
+  if (!absPos)
+    updatePos(x, y, width + scaleLength(GDI_BUTTON_SPACING), height + 5);
+
+  bi.xp = x;
+  bi.yp = y - 1;
+  bi.width = width;
+  bi.id = id;
+  bi.callBack = cb;
+  bi.absPos = absPos;
+
+  image.loadImage(imgId, Image::ImageMethod::Default); 
+  HBITMAP bm = image.getVersion(imgId, width - 5, height - 5);
+  SendMessage(bi.hWnd, BM_SETIMAGE, IMAGE_BITMAP, LPARAM(bm));
 
   if (tooltip.length() > 0)
     addToolTip(id, tooltip, bi.hWnd);
@@ -1420,7 +1552,7 @@ ButtonInfo& gdioutput::addCheckbox(int x, int y, const string& id, const wstring
   bi.text = ttext;
   bi.id = id;
   bi.callBack = cb;
-  bi.AbsPos = AbsPos;
+  bi.absPos = AbsPos;
   bi.originalState = Checked;
   bi.isEdit(true);
   BI.push_back(bi);
@@ -1430,14 +1562,13 @@ ButtonInfo& gdioutput::addCheckbox(int x, int y, const string& id, const wstring
   return BI.back();
 }
 
-bool gdioutput::isChecked(const string &id)
-{
+bool gdioutput::isChecked(const string &id) {
   list<ButtonInfo>::iterator it;
-  for(it=BI.begin(); it != BI.end(); ++it)
-    if (it->id==id)
-      return SendMessage(it->hWnd, BM_GETCHECK, 0, 0)==BST_CHECKED;
-
-  return false;
+  for (it = BI.begin(); it != BI.end(); ++it) {
+    if (it->id == id)
+      return SendMessage(it->hWnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+  }
+  return false; // Also if CB does not exist
 }
 
 void gdioutput::check(const string &id, bool state, bool keepOriginalState){
@@ -2074,14 +2205,11 @@ int gdioutput::getItemDataByName(const char *id, const char *name) const{
   return -1;
 }
 
-bool gdioutput::selectItemByData(const char *id, int data)
-{
-  list<ListBoxInfo>::iterator it;
-  for(it=LBI.begin(); it != LBI.end(); ++it){
-    if (it->id==id) {
+bool gdioutput::selectItemByData(const char* id, int data) {
+  for (auto it = LBI.begin(); it != LBI.end(); ++it) {
+    if (it->id == id) {
       if (it->IsCombo) {
-        
-        if (data==-1) {
+        if (data == -1) {
           SendMessage(it->hWnd, CB_SETCURSEL, -1, 0);
           it->data = 0;
           it->text = L"";
@@ -2091,7 +2219,7 @@ bool gdioutput::selectItemByData(const char *id, int data)
         }
         else {
           LRESULT count = SendMessage(it->hWnd, CB_GETCOUNT, 0, 0);
-          
+
           for (int m = 0; m < count; m++) {
             LRESULT ret = SendMessage(it->hWnd, CB_GETITEMDATA, m, 0);
             if (ret == data) {
@@ -2099,7 +2227,8 @@ bool gdioutput::selectItemByData(const char *id, int data)
               it->data = data;
               it->originalIdx = data;
               TCHAR bf[1024];
-              if (SendMessage(it->hWnd, CB_GETLBTEXT, m, LPARAM(bf))!=CB_ERR) {
+              if (SendMessage(it->hWnd, CB_GETLBTEXT, m, LPARAM(bf)) != CB_ERR) {
+                bf[1023] = 0;
                 it->text = bf;
                 it->original = bf;
               }
@@ -2110,9 +2239,9 @@ bool gdioutput::selectItemByData(const char *id, int data)
         return false;
       }
       else {
-        if (data==-1) {
+        if (data == -1) {
           SendMessage(it->hWnd, LB_SETCURSEL, -1, 0);
-          it->data=0;
+          it->data = 0;
           it->text = L"";
           it->original = L"";
           it->originalIdx = -1;
@@ -2129,6 +2258,7 @@ bool gdioutput::selectItemByData(const char *id, int data)
               it->originalIdx = data;
               TCHAR bf[1024];
               if (SendMessage(it->hWnd, LB_GETTEXT, m, LPARAM(bf)) != LB_ERR) {
+                bf[1023] = 0;
                 it->text = bf;
                 it->original = bf;
               }
@@ -2650,6 +2780,8 @@ LRESULT gdioutput::ProcessMsgWrp(UINT iMessage, LPARAM lParam, WPARAM wParam)
 
     list<InfoBox>::iterator it = IBox.begin();
 
+    if (mouseHandler)
+      SetCursor(LoadCursor(NULL, IDC_HAND)); // TODO: Control from hanlder?
 
     while (it != IBox.end()) {
       if (PtInRect(&it->textRect, pt) && (it->callBack || it->hasEventHandler())) {
@@ -2741,11 +2873,13 @@ LRESULT gdioutput::ProcessMsgWrp(UINT iMessage, LPARAM lParam, WPARAM wParam)
     }
 
     list<InfoBox>::iterator it = IBox.begin();
-
     POINT pt;
     pt.x = (signed short)LOWORD(lParam);
     pt.y = (signed short)HIWORD(lParam);
 
+    if (mouseHandler) 
+      mouseHandler->mouseButton(*this, MouseHandler::MouseEvent::LButtonDown, pt.x + OffsetX, pt.y + OffsetY);
+    
     list<TableInfo>::iterator tit;
 
     if (useTables) {
@@ -2789,6 +2923,9 @@ LRESULT gdioutput::ProcessMsgWrp(UINT iMessage, LPARAM lParam, WPARAM wParam)
     POINT pt;
     pt.x = (signed short)LOWORD(lParam);
     pt.y = (signed short)HIWORD(lParam);
+
+    if (mouseHandler)
+      mouseHandler->mouseButton(*this, MouseHandler::MouseEvent::LButtonDown, pt.x + OffsetX, pt.y + OffsetY);
 
     if (useTables) {
       for (tit = Tables.begin(); tit != Tables.end(); ++tit)
@@ -3244,13 +3381,13 @@ void gdioutput::doEscape()
 void gdioutput::clearPage(bool autoRefresh, bool keepToolbar) {
   maxTextBlockHeight = getLineHeight();
   animationData.reset();
+  mouseHandler.reset();
+  renderMap.reset();
   lockUpDown = false;
   hasAnyTimer = false;
   enableTables();
-#ifndef MEOSDB
   if (toolbar && !keepToolbar)
     toolbar->hide();
-#endif
 
   while (!timers.empty()) {
     KillTimer(hWndTarget, (UINT_PTR)&timers.back());
@@ -3535,24 +3672,18 @@ BaseInfo *gdioutput::setTextTranslate(const char *id,
   return setText(id, lang.tl(text), update);
 }
 
-
-
-BaseInfo *gdioutput::setText(const char *id, int number, bool Update)
-{
+BaseInfo *gdioutput::setText(const char *id, int number, bool Update) {
   return setText(id, itow(number), Update);
 }
 
-BaseInfo *gdioutput::setTextZeroBlank(const char *id, int number, bool Update)
-{
-  if (number!=0)
-    return setText(id, number, Update);
+BaseInfo* gdioutput::setTextZeroBlank(const char* id, int number, bool update) {
+  if (number != 0)
+    return setText(id, number, update);
   else
-    return setText(id, L"", Update);
+    return setText(id, L"", update);
 }
 
-
-BaseInfo *gdioutput::setText(const char *id, const wstring &text, bool update, int requireExtraMatch, bool updateOriginal)
-{
+BaseInfo* gdioutput::setText(const char* id, const wstring& text, bool update, int requireExtraMatch, bool updateOriginal) {
   for (auto it = II.begin(); it != II.end(); ++it) {
     if (it->id == id && it->matchExtra(requireExtraMatch)) {
       bool oldWR = it->writeLock;
@@ -3610,8 +3741,7 @@ BaseInfo *gdioutput::setText(const char *id, const wstring &text, bool update, i
   return nullptr;
 }
 
-bool gdioutput::insertText(const string &id, const wstring &text)
-{
+bool gdioutput::insertText(const string& id, const wstring& text) {
   for (list<InputInfo>::iterator it = II.begin();
     it != II.end(); ++it) {
     if (it->id == id) {
@@ -3629,8 +3759,7 @@ bool gdioutput::insertText(const string &id, const wstring &text)
   return false;
 }
 
-void gdioutput::setData(const string &id, DWORD data)
-{
+void gdioutput::setData(const string &id, DWORD data) {
   void *pd = (void *)(size_t(data));
   setData(id, pd);
 }
@@ -4604,7 +4733,10 @@ void gdioutput::RenderString(TextInfo &ti, HDC hDC) {
       w = image.getWidth(id);
       h = image.getHeight(id);
       setWH = true;
-      image.drawImage(id, Image::ImageMethod::Default, hDC, rc.left, rc.top, w, h);
+      image.drawImage(id, Image::ImageMethod::Default, hDC, rc.left, rc.top, w, h,
+                      ti.srcRect.left, ti.srcRect.top,
+                      ti.srcRect.right - ti.srcRect.left,
+                      ti.srcRect.bottom - ti.srcRect.top);
     }
     else if (ti.text.size()>1) {      
       if (ti.text[0] == 'S') { // Icon
@@ -4618,7 +4750,10 @@ void gdioutput::RenderString(TextInfo &ti, HDC hDC) {
         if (imgId > 0) {
           w = ti.textRect.right - ti.textRect.left;
           h = ti.textRect.bottom - ti.textRect.top;
-          image.drawImage(imgId, Image::ImageMethod::Default, hDC, rc.left, rc.top, w, h);
+          image.drawImage(imgId, Image::ImageMethod::Default, hDC, rc.left, rc.top, w, h, 
+                          ti.srcRect.left, ti.srcRect.top,
+                          ti.srcRect.right - ti.srcRect.left,
+                          ti.srcRect.bottom - ti.srcRect.top);
         }
       }
     }
@@ -4999,7 +5134,7 @@ void gdioutput::updateToolTips() {
 
 void gdioutput::updateObjectPositions() {
   for (auto it = BI.begin(); it != BI.end(); ++it) {
-    if (!it->AbsPos)
+    if (!it->absPos)
       SetWindowPos(it->hWnd, 0, it->xp - OffsetX, it->yp - OffsetY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOCOPYBITS);
   }
   for (auto it = II.begin(); it != II.end(); ++it)
@@ -5988,6 +6123,15 @@ RectangleInfo &RectangleInfo::changeDimension(gdioutput &gdi, int dx, int dy) {
   return *this;
 }
 
+RectangleInfo &gdioutput::addRectangle(int left, int top, int right, int bottom, 
+                                       GDICOLOR color,
+                                       bool drawBorder, 
+                                       bool addFirst) {
+  RECT rc = { left, top, right, bottom };
+  return addRectangle(rc, color, drawBorder, addFirst);
+}
+
+
 RectangleInfo &gdioutput::addRectangle(const RECT &rc, GDICOLOR color, bool drawBorder, bool addFirst) {
   RectangleInfo ri;
 
@@ -6022,6 +6166,14 @@ RectangleInfo &gdioutput::addRectangle(const RECT &rc, GDICOLOR color, bool draw
     Rectangles.push_back(ri);
     return Rectangles.back();
   }
+}
+
+void gdioutput::setMapRenderer(shared_ptr<MapDataRenderer>& rdr) {
+  renderMap = rdr;
+}
+
+MapDataRenderer *gdioutput::getMapRenderer() const {
+  return renderMap.get();
 }
 
 RectangleInfo &gdioutput::getRectangle(const char *id) {
@@ -6812,6 +6964,11 @@ InputInfo &InputInfo::setPassword(bool pwd) {
   return *this;
 }
 
+InputInfo& InputInfo::limitText(int limit) {
+  SendMessage(hWnd, EM_LIMITTEXT, limit, 0);
+  return *this;
+}
+
 int gdioutput::setHighContrastMaxWidth() {
 
   RECT rc;
@@ -7086,6 +7243,8 @@ float GDIImplFontSet::baseSize(int format, float scale)  {
 
 void GDIImplFontSet::init(double scale, const wstring &font, const wstring &gdiName_)
 {
+  if (font == L"Segoe UI")
+    scale = scale * 1.1;
   int charSet = DEFAULT_CHARSET;
   deleteFonts();
   gdiName = gdiName_;

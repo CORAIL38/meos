@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -152,8 +152,10 @@ enum EPostType {
   lRunnerDataA,
   lRunnerDataB,
   lRunnerTextA,
+  lRunnerAnnotation,
 
   lTeamName,
+  lTeamNameRaw,
   lTeamStart,
   lTeamStartCond,
   lTeamStartZero,
@@ -193,6 +195,7 @@ enum EPostType {
   lTeamDataA,
   lTeamDataB,
   lTeamTextA,
+  lTeamAnnotation,
 
   lPunchNamedTime,
   lPunchTeamTotalNamedTime,
@@ -238,6 +241,12 @@ enum EPostType {
   lControlMistakeQuotient,
   lControlRunnersLeft,
   lControlCodes,
+
+  lRogainingLeg,
+  lRogainingLegFrom,
+  lRogainingLegTo,
+  lRogainingLegBestTime,
+  lRogainingLegNumCompetitors,
 
   lNumEntries,
   lNumStarts,
@@ -316,7 +325,8 @@ enum EFilterList
   EFilterWrongFee,
   EFilterIncludeNotParticipating,
   EFilterModifiedCard,
-  EFilterTimeNoResult,
+  EFilterTimeNoResult, // Finish time, but not card yet
+  EFilterUnexpectedPunchOrder, // Order of punches does not match time
   _EFilterMax
 };
 
@@ -544,6 +554,8 @@ public:
                   EBaseTypeTeamGlobal, // Used only in metalist (meaning global, not classwise)
                   EBaseTypeCourse,
                   EBaseTypeControl,
+                  EBaseTypeRGLeg,
+                  EBaseTypeRGLegGlobal,
                   EBasedTypeLast_};
 
   bool isTeamList() const {return listType == EBaseTypeTeam;}
@@ -707,7 +719,7 @@ public:
   int getMaxCharWidth(oEvent &oe,
                       const gdioutput &gdi,
                       const set<int> &clsSel,
-                      const vector< pair<EPostType, wstring> > &typeFormats,
+                      const vector<tuple<EPostType, int, wstring>> &typeFormats,
                       gdiFonts font,
                       const wchar_t *fontFace = nullptr,
                       bool large = false, 
@@ -716,12 +728,13 @@ public:
   int getMaxCharWidth(oEvent &oe, 
                       const set<int> &clsSel,
                       EPostType type, 
+                      int legIndex,
                       wstring formats,
                       gdiFonts font,
                       const wchar_t *fontFace = nullptr,
                       bool large = false, 
                       int minSize = 0) const {
-    vector<pair<EPostType, wstring>> typeFormats(1, make_pair(type, formats));
+    vector<tuple<EPostType, int, wstring>> typeFormats(1, make_tuple(type, legIndex, formats));
     return getMaxCharWidth(oe, oe.gdiBase(), clsSel, typeFormats, font, fontFace, largeSize, minSize);
   }
 

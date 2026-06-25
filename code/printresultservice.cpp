@@ -8,6 +8,7 @@
 #include "HTMLWriter.h"
 #include "machinecontainer.h"
 #include "TabList.h"
+#include "xmlparser.h"
 
 int AutomaticCB(gdioutput* gdi, GuiEventType type, BaseInfo* data);
 

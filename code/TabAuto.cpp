@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -282,7 +282,6 @@ void TabAuto::setTimer(AutoMachine* am)
     am->timeout = to;
   }
 }
-
 
 bool TabAuto::clearPage(gdioutput &gdi, bool postClear) {
   if (!postClear) {
@@ -864,12 +863,14 @@ void PunchMachine::settings(gdioutput &gdi, oEvent &oe, State state) {
   gdi.addString("", 10, "help:simulate");
 
   gdi.pushX();
+  
+  gdi.addCheckbox("FullRadio", "Simulera med radiopasseringar", nullptr, fullRadio);
+  
   gdi.fillRight();
   gdi.dropLine();
 
-  gdi.addString("", 0, "Radiotider, kontroll:");
-  gdi.dropLine(-0.2);
-  gdi.addInput("Radio", L"", 6, 0);
+  gdi.addString("", 0, "Ungefärlig löptid:");
+  gdi.addInput("RunningTime", formatTime(approxRunningTime), 6, 0);
 
   gdi.fillDown();
   gdi.popX();
@@ -893,7 +894,170 @@ void PunchMachine::save(oEvent &oe, gdioutput &gdi, bool doProcess) {
   }
   else {
     interval = t;
-    radio = gdi.getTextNo("Radio");
+    fullRadio = gdi.isChecked("FullRadio");
+    wstring rt = gdi.getText("RunningTime");
+    approxRunningTime = convertAbsoluteTimeMS(rt);
+
+    if (approxRunningTime < timeConstMinute || approxRunningTime > 2 * timeConstHour)
+      throw meosException(L"Ogiltigt antal sekunder: X#" + rt);
+
+    vector<pRunner> rr;
+    oe.getRunners(-1, -1, rr);
+
+    oe.updateComputerTime(false);
+    int now = oe.getComputerTime();
+
+    int numBad = 0;
+    punchesTimeCodeCardNo.clear();
+    cardsByTime.clear();
+    map<int, pair<int, int>> runnerToStartFinish;
+    bool isMore = true;
+    for (int leg = 0; leg < 32 && isMore; leg++) {
+      isMore = false;
+
+      for (pRunner r : rr) {
+        if (r->getLegNumber() == leg && r->hasFinished()) {
+          if (auto res = runnerToStartFinish.emplace(r->getId(), make_pair(0, 0)); res.second) {
+            res.first->second.first = r->getStartTime();
+            res.first->second.second = r->getFinishTime();
+          }
+          continue;
+        }
+        if (r->hasFinished() || r->getCardNo() == 0)
+          continue;
+
+        if (r->getLegNumber() < leg) {
+          if (auto res = runnerToStartFinish.emplace(r->getId(), make_pair(0, 0)); res.second) {
+            res.first->second.first = r->getStartTime();
+            res.first->second.second = r->getFinishTime();
+          }
+          continue;
+        }
+        else if (r->getLegNumber() > leg) {
+          isMore = true;
+          continue;
+        }
+
+        int st = r->getStartTime();
+
+        if (st <= 0 && leg > 0 && r->getTeam() && r->getClassRef(false)) {
+          
+          int nth = 0;
+          pClass cls = r->getClassRef(false);
+          
+          auto getParStartTime = [r, cls, &runnerToStartFinish](int baseLeg, int nth) {
+            if (baseLeg == 0)
+              return 0;
+
+            LegTypes lt = cls->getLegType(baseLeg - 1);
+            if (lt == LegTypes::LTNormal) {
+              pRunner rP = r->getTeam()->getRunner(baseLeg - 1);
+              if (rP != nullptr) {
+                if (auto res = runnerToStartFinish.find(rP->getId()); res != runnerToStartFinish.end())
+                  return res->second.second;
+              }
+              return 0;
+            }
+            vector<int> startTimes;
+            
+            int start = cls->getPreceedingLeg(baseLeg - 1);
+            if (start == -1)
+              return 0;
+
+            for (int i = start; i < baseLeg; i++) {
+               pRunner rP = r->getTeam()->getRunner(i);
+              if (rP != nullptr) {
+                if (auto res = runnerToStartFinish.find(rP->getId()); res != runnerToStartFinish.end())
+                  startTimes.push_back(res->second.second);
+              }
+            }
+            sort(startTimes.begin(), startTimes.end());
+            int ix = max(0, int(startTimes.size()) - nth - 1);
+            if (ix >= 0 && ix < startTimes.size())
+              return startTimes[0];
+            else
+              return 0;
+          };
+
+          StartTypes s = cls->getStartType(leg);
+          if (s != StartTypes::STDrawn && s != StartTypes::STTime) {
+            while (leg - nth >= 0) {
+              StartTypes s = cls->getStartType(leg - nth);
+              LegTypes lt = cls->getLegType(leg - nth);
+              if (lt == LegTypes::LTExtra || lt == LegTypes::LTIgnore) {
+                pRunner rP = r->getTeam()->getRunner(leg - nth);
+                if (rP)
+                  st = runnerToStartFinish[rP->getId()].first;
+
+                break;
+              }
+              else if (lt == LegTypes::LTNormal) {
+                st = getParStartTime(leg - nth, nth);
+                break;
+              }
+              else if (lt == LegTypes::LTParallel || lt == LegTypes::LTParallelOptional) {
+                nth++;
+                continue;
+              } 
+            }
+          }
+        }
+
+        int cno = r->getCardNo();
+        if (st > 0 && (st + approxRunningTime <= now || st > now + timeConstHour)) {
+          numBad++;
+          continue;
+        }
+
+        bool hasStart = true;
+        if (st <= 0) {
+          hasStart = false;
+          st = now + 5 + (rand() * timeConstSecond) % approxRunningTime;
+          punchesTimeCodeCardNo.emplace_back(st, oPunch::PunchStart, cno);
+        }
+
+        int ft = st + approxRunningTime + (rand() * timeConstSecond) % (approxRunningTime / 2);
+
+        runnerToStartFinish[r->getId()] = make_pair(st, ft);
+
+        if (r->getCourse(false)) {
+          pCourse c = r->getCourse(false);
+          vector<int> punches;
+          vector<pControl> pc;
+          c->getControls(pc);
+          for (pControl c : pc)
+            punches.push_back(c->getFirstNumber());
+
+          auto card = make_shared<SICard>(ConvertedTimeStatus::Done);
+          card->isDebugCard = true;
+          card->CardNumber = cno;
+          TabSI::generateTestCard(*card, punches, -1, st, ft);
+
+          if (hasStart)
+            card->StartPunch.Code = -1;
+
+          if ((rand() % 39) == 1) { // MP
+            card->Punch[(rand() % card->nPunch)].Code += 5;
+          }
+
+          cardsByTime.emplace_back(ft + 7 * timeConstSecond, card);
+
+          for (int j = 0; j < punches.size(); j++) {
+            if (pc[j]->isValidRadio()) {
+              if ((rand() % 41) != 1) {
+                punchesTimeCodeCardNo.emplace_back(card->Punch[j].Time, card->Punch[j].Code, cno);
+              }
+            }
+          }
+        }
+
+        punchesTimeCodeCardNo.emplace_back(ft, oPunch::PunchFinish, cno);
+      }
+    }
+    
+    sort(cardsByTime.begin(), cardsByTime.end(), [](const auto& a, const auto& b) {return a.first > b.first; });
+    sort(punchesTimeCodeCardNo.begin(), punchesTimeCodeCardNo.end(), [](const auto& a, const auto& b) {return get<0>(a) > get<0>(b); });
+    
   }
 }
 
@@ -921,17 +1085,59 @@ void PunchMachine::status(gdioutput &gdi)
 void PunchMachine::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
   processProtected(gdi, ast, [&]() {
     SICard sic(ConvertedTimeStatus::Hour24);
-    SportIdent& si = TabSI::getSI(gdi);
+    SportIdent& si = TabSI::getSI();
 
-    if (radio == 0) {
+    if (!fullRadio) {
       oe->generateTestCard(sic);
       if (!sic.empty()) {
-        if (!radio) si.addCard(sic);
+        si.addCard(sic);
       }
       else gdi.addInfoBox("", L"Failed to generate card.", L"", BoxStyle::Header, interval * 2000);
     }
+    else if (fullRadio) {
+      oe->updateComputerTime(false);
+      int now = oe->getComputerTime();
+
+      OutputDebugString((L"Adding data " + oe->getAbsTime(now) + L"\n").c_str());
+
+      while (!punchesTimeCodeCardNo.empty()) {
+        auto& [time, code, card] = punchesTimeCodeCardNo.back();
+        if (time <= now) {
+          SICard sic(ConvertedTimeStatus::Done);
+          sic.CardNumber = card;
+          sic.punchOnly = true;
+          sic.nPunch = 1;
+          sic.Punch[0].Code = code;
+          sic.Punch[0].Time = time;
+          
+          
+          OutputDebugString((L"Punch " + itow(code) + L" for "  + itow(card) + L", FT: " + oe->getAbsTime(time) + L"\n").c_str());
+
+          si.addCard(sic);
+          punchesTimeCodeCardNo.pop_back();
+        }
+        else {
+          OutputDebugString((L"Next punch event " + oe->getAbsTime(time) + L"\n").c_str());
+          break;
+        }
+      }
+
+      while (!cardsByTime.empty()) {
+        auto& [time, card] = cardsByTime.back();
+        if (time <= now) {
+          OutputDebugString((L"Card for " + itow(card->CardNumber) + L", FT: " + oe->getAbsTime(card->FinishPunch.Time) + L"\n").c_str());
+          si.addCard(*card);
+          cardsByTime.pop_back();
+        }
+        else {
+          OutputDebugString((L"Next card event " + oe->getAbsTime(time) + L"\n").c_str());
+          break;
+        }
+      }
+    }
     else {
-      SICard sic(ConvertedTimeStatus::Hour24);
+      //NOP
+      /*SICard sic(ConvertedTimeStatus::Hour24);
       vector<pRunner> rr;
       oe->getRunners(0, 0, rr);
       vector<pRunner> cCand;
@@ -962,7 +1168,7 @@ void PunchMachine::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
         sic.Punch[0].Code = radio;
         sic.Punch[0].Time = timeConstHour / 10 + rand() % (1200 * timeConstSecond) + r->getStartTime();
         si.addCard(sic);
-      }
+      }*/
     }
   });
 }
@@ -1104,7 +1310,7 @@ void SaveMachine::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
           }
         }
         oe->autoSynchronizeLists(true);
-        oe->save(file, false);
+        oe->save(file, true, false);
       });
     }
   }

@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -322,6 +322,12 @@ public:
     return type == lResultModuleNumber || type == lResultModuleTime ||
       type == lResultModuleTimeTeam || type == lResultModuleNumberTeam;
   }
+
+  static constexpr bool isLegBased(EPostType type) {
+    return !isResultModuleOutput(type) && !isAllStageType(type) &&
+      type != lRunnerAnnotation && type != lTeamAnnotation;
+  }
+
   bool supportClasses() const;
   const wstring &getListInfo(const oEvent &oe) const;
   void clearTag() {tag.clear();}

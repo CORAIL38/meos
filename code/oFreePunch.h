@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,13 +24,14 @@
 
 #include "oBase.h"
 #include "oPunch.h"
-#include "xmlparser.h"
 
 class oFreePunch;
 typedef oFreePunch* pFreePunch;
 class oRunner;
 typedef oRunner *pRunner;
 class Table;
+class xmlparser;
+class xmlobject;
 
 class oFreePunch final : public oPunch {
 protected:

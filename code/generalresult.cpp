@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 #include "oListInfo.h"
 #include "meosexception.h"
 #include "localizer.h"
+#include "xmlparser.h"
 
 extern gdioutput *gdi_main;
 
@@ -767,8 +768,8 @@ RunnerStatus DynamicResult::toStatus(int status) const {
     return StatusDNS;
   case StatusCANCEL:
     return StatusCANCEL;
-  case StatusNotCompetiting:
-    return StatusNotCompetiting;
+  case StatusNotCompeting:
+    return StatusNotCompeting;
   case StatusDQ:
     return StatusDQ;
   case StatusMAX:
@@ -983,6 +984,7 @@ void DynamicResult::declareSymbols(DynamicMethods m, bool clear) const {
   parser.declareSymbol("PointReduction", "Automatic rogaining point reduction", false);
   parser.declareSymbol("PointOvertime", "Runner/team rogaining overtime", false);
   parser.declareSymbol("PointGross", "Rogaining points before automatic reduction", false);
+  parser.declareSymbol("LocalTime", "Current local time", false);
 
   parser.declareSymbol("PointAdjustment", "Runner/team rogaining points adjustment", false);
   parser.declareSymbol("TimeAdjustment", "Runner/team time adjustment", false);
@@ -1074,7 +1076,9 @@ void DynamicResult::declareSymbols(DynamicMethods m, bool clear) const {
   parser.declareSymbol("StatusMAX", "Status code for a time over the maximum", false);
   parser.declareSymbol("StatusDQ", "Status code for disqualification", false);
   parser.declareSymbol("StatusOutOfCompetition", "Status code for running out-of-competition", false);
-  parser.declareSymbol("StatusNotCompetiting", "Status code for not competing", false);
+  parser.declareSymbol("StatusNotCompetiting", "@", false, false, true); // Deprecated
+  parser.declareSymbol("StatusNotCompeting", "Status code for not competing", false);
+
   parser.declareSymbol("StatusNoTiming", "Status code for no timing", false);
 
   parser.declareSymbol("ShortestClassTime", "Shortest time in class", false);
@@ -1158,8 +1162,11 @@ void DynamicResult::prepareCalculations(oEvent &oe,
   parser.addSymbol("StatusDQ", StatusDQ);
   parser.addSymbol("StatusOutOfCompetition", StatusOutOfCompetition);
   parser.addSymbol("StatusNoTiming", StatusNoTiming);
-  parser.addSymbol("StatusNotCompetiting", StatusNotCompetiting);
+  parser.addSymbol("StatusNotCompetiting", StatusNotCompeting); // Deprecated symbol
+  parser.addSymbol("StatusNotCompeting", StatusNotCompeting);
 
+  oe.updateComputerTime(false);
+  parser.addSymbol("LocalTime", oe.getComputerTime() / timeConstSecond);
   parser.addSymbol("MaxTime", oe.getMaximalTime());
   parser.addSymbol("InputNumber", inputNumber);
 }

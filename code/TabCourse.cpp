@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,17 +22,12 @@
 
 #include "stdafx.h"
 
-#include "resource.h"
-
-#include <commctrl.h>
-#include <commdlg.h>
 #include <cassert>
 
 #include "oEvent.h"
 #include "xmlparser.h"
 #include "gdioutput.h"
 #include "csvparser.h"
-#include "SportIdent.h"
 #include "gdifonts.h"
 #include "IOF30Interface.h"
 #include "meosexception.h"
@@ -41,9 +36,13 @@
 #include "oListInfo.h"
 
 #include "TabCourse.h"
-#include "TabCompetition.h"
 #include "meos_util.h"
 #include "pdfwriter.h"
+#include "image.h"
+#include "maprenderer.h"
+
+extern Image image;
+
 
 TabCourse::TabCourse(oEvent *poe):TabBase(poe)
 {
@@ -64,6 +63,8 @@ void TabCourse::selectCourse(gdioutput &gdi, pCourse pc)
     gdi.setText("PointReduction", L"");
     gdi.disableInput("PointReduction");
     gdi.check("ReductionPerMinute", false);
+    gdi.check("AllowLatePoints", false);
+    gdi.disableInput("AllowLatePoints");
     gdi.disableInput("ReductionPerMinute");
     gdi.selectItemByData("Rogaining", 0);
   }
@@ -95,14 +96,16 @@ void TabCourse::selectCourse(gdioutput &gdi, pCourse pc)
         gdi.enableInput("TimeLimit");
         gdi.setText("TimeLimit", formatTimeHMS(rt));
         gdi.enableInput("PointReduction");
-        gdi.setText("PointReduction", itow(pc->getRogainingPointsPerMinute()));
+        gdi.setText("PointReduction", oe->formatScore(pc->getRogainingPointsPerMinute()));
         gdi.enableInput("ReductionPerMinute");
         gdi.check("ReductionPerMinute", pc->getDCI().getInt("RReductionMethod") != 0);
+        gdi.enableInput("AllowLatePoints");
+        gdi.check("AllowLatePoints", pc->getDCI().getInt("NoLatePoints") == 0);
       }
       else if (rp > 0) {
         gdi.selectItemByData("Rogaining", 2);
         gdi.enableInput("PointLimit");
-        gdi.setText("PointLimit", itow(rp));
+        gdi.setText("PointLimit", oe->formatScore(rp));
       }
     }
 
@@ -186,6 +189,7 @@ void TabCourse::selectCourse(gdioutput &gdi, pCourse pc)
     gdi.check("Shorten", sh.first);
     gdi.setInputStatus("ShortCourse", sh.first);
     gdi.selectItemByData("ShortCourse", sh.second ? sh.second->getId() : 0);
+    gdi.setInputStatus("ShowMap", true, true);
   }
   else {
     gdi.setText("Name", L"");
@@ -210,7 +214,7 @@ void TabCourse::selectCourse(gdioutput &gdi, pCourse pc)
     gdi.check("Shorten", false);
     gdi.clearList("ShortCourse");
     gdi.setInputStatus("ShortCourse", false);
-
+    gdi.setInputStatus("ShowMap", false, true);
     gdi.enableEditControls(false);
   }
   gdi.refreshFast();
@@ -297,12 +301,13 @@ void TabCourse::save(gdioutput &gdi, int canSwitchViewMode) {
   if (gdi.hasWidget("Rogaining")) {
     string t;
     pc->setMaximumRogainingTime(convertAbsoluteTimeMS(gdi.getText("TimeLimit")));
-    pc->setMinimumRogainingPoints(_wtoi(gdi.getText("PointLimit").c_str()));
-    int pr = _wtoi(gdi.getText("PointReduction").c_str());
+    pc->setMinimumRogainingPoints(oe->convertScore(gdi.getText("PointLimit")));
+    int pr = oe->convertScore(gdi.getText("PointReduction"));
     pc->setRogainingPointsPerMinute(pr);
-    if (pr > 0) {
+    if (pc->getMaximumRogainingTime() > 0) {
       int rmethod = gdi.isChecked("ReductionPerMinute") ? 1 : 0;
       pc->getDI().setInt("RReductionMethod", rmethod);
+      pc->getDI().setInt("NoLatePoints", gdi.isChecked("AllowLatePoints") ? 0 : 1);
     }
   }
 
@@ -333,10 +338,10 @@ void TabCourse::save(gdioutput &gdi, int canSwitchViewMode) {
 }
 
 int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
-  if (type==GUI_BUTTON) {
-    ButtonInfo bi=*(ButtonInfo *)data;
+  if (type == GUI_BUTTON) {
+    ButtonInfo bi = *(ButtonInfo*)data;
 
-    if (bi.id=="Save") {
+    if (bi.id == "Save") {
       save(gdi, 1);
     }
     else if (bi.id == "SwitchMode") {
@@ -347,7 +352,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
     }
     else if (bi.id == "LegLengths") {
       save(gdi, 2);
-      
+
       pCourse pc = oe->getCourse(courseId);
       if (!pc || pc->getNumControls() == 0) {
         return 0;
@@ -363,13 +368,13 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
 
       for (int i = 0; i <= pc->getNumControls(); i++) {
         int len = pc->getLegLength(i);
-        pControl cbegin = pc->getControl(i-1);
+        pControl cbegin = pc->getControl(i - 1);
         wstring begin = i == 0 ? lang.tl("Start") : (cbegin ? cbegin->getName() : L"");
         pControl cend = pc->getControl(i);
         wstring end = i == pc->getNumControls() ? lang.tl("Mål") : (cend ? cend->getName() : L"");
         gdi.pushX();
         gdi.fillRight();
-        gdi.addStringUT(0, begin + makeDash(L" - ") + end + L":").xlimit = w-10;
+        gdi.addStringUT(0, begin + makeDash(L" - ") + end + L":").xlimit = w - 10;
         gdi.setCX(xp);
         gdi.fillDown();
         gdi.addInput("c" + itos(i), len > 0 ? itow(len) : L"", 8);
@@ -377,7 +382,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
         if (i < pc->getNumControls()) {
           RECT rc;
           rc.left = gdi.getCX() + gdi.getLineHeight();
-          rc.right = rc.left + (3*w)/2;
+          rc.right = rc.left + (3 * w) / 2;
           rc.top = gdi.getCY() + 2;
           rc.bottom = gdi.getCY() + 4;
           gdi.addRectangle(rc, colorDarkBlue, false);
@@ -396,26 +401,55 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       saveLegLengths(gdi);
       loadPage(gdi);
     }
-    else if (bi.id=="BrowseCourse") {
-      vector< pair<wstring, wstring> > ext;
-      ext.push_back(make_pair(L"Alla banfiler", L"*.xml;*.csv;*.txt"));
-      ext.push_back(make_pair(L"Banor, OCAD semikolonseparerat", L"*.csv;*.txt"));
-      ext.push_back(make_pair(L"Banor, IOF (xml)", L"*.xml"));
-
-      wstring file=gdi.browseForOpen(ext, L"csv");
-
-      if (file.length()>0)
+    else if (bi.id == "BrowseCourse") {
+      wstring file = browseForCourse(gdi);
+      if (file.length() > 0)
         gdi.setText("FileName", file);
     }
-    else if (bi.id=="Print") {
+    else if (bi.id == "BrowseMap") {
+      vector<pair<wstring, wstring>> ext = { make_pair(L"Bilder", L"*.png") };
+      wstring fn = gdi.browseForOpen(ext, L"png");
+
+      if (fn.length() > 0) {
+        gdi.setText("MapFileName", fn);
+
+        wstring world = fn + L"w";
+
+        if (!fileExists(world) && fn.length() > 3) {
+
+          world = fn.substr(0, fn.length() - 2) + fn.back() + L"w";
+          if (!fileExists(world)) {
+            world.clear();
+            int ext = fn.find_last_of('.');
+            if (ext != wstring::npos) {
+              world = fn.substr(0, ext) + L"wld";
+              if (!fileExists(world)) {
+                world.clear();
+              }
+            }
+          }
+        }
+
+        if (!world.empty())
+          gdi.setText("WorldFileName", world);
+      }
+    }
+    else if (bi.id == "BrowseWorld") {
+      vector<pair<wstring, wstring>> ext = { make_pair(L"World file", L"*.pgw;*.pngw;*.wld") };
+      wstring fn = gdi.browseForOpen(ext, L"pgw");
+
+      if (fn.length() > 0)
+        gdi.setText("WorldFileName", fn);
+    }
+    else if (bi.id == "Print") {
       gdi.print(oe);
     }
-    else if (bi.id=="PDF") {
+    else if (bi.id == "PDF") {
       vector< pair<wstring, wstring> > ext;
       ext.push_back(make_pair(L"Portable Document Format (PDF)", L"*.pdf"));
 
       int index;
-      wstring file=gdi.browseForSave(ext, L"pdf", index);
+      wstring file = gdi.browseForSave(ext, L"pdf", index);
 
       if (!file.empty()) {
         pdfwriter pdf;
@@ -458,17 +492,102 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       }
     }
     else if (bi.id == "ExportCourses") {
-      int FilterIndex=0;
+      int FilterIndex = 0;
       vector< pair<wstring, wstring> > ext;
       ext.push_back(make_pair(L"IOF CourseData, version 3.0 (xml)", L"*.xml"));
       wstring save = gdi.browseForSave(ext, L"xml", FilterIndex);
-      if (save.length()>0) {
+      if (save.length() > 0) {
         IOF30Interface iof30(oe, false, false);
         xmlparser xml;
         xml.openOutput(save.c_str(), false);
         iof30.writeCourses(xml);
         xml.closeOut();
       }
+    }
+    else if (bi.id == "ShowMap") {
+      pCourse crs = oe->getCourse(courseId);
+      showMap(oe, gdi, crs, crs->getName(), 0.0);
+    }
+    else if (bi.id == "LocateMap") {
+      locateMap(gdi);
+    }
+    else if (bi.id == "AddMap") {
+      gdi.clearPage(true);
+      gdi.addString("", boldLarge, "Importera kartbild");
+      gdi.popX();
+      addImportMapWidgets(gdi);
+
+      gdi.fillRight();
+      gdi.addButton("DoImportMap", "Importera", CourseCB).setDefault();
+      gdi.fillDown();
+      gdi.addButton("Cancel", "Avbryt", CourseCB).setCancel();
+      gdi.setInputFocus("MapFileName");
+    }
+    else if (bi.id == "DoImportMap") {
+      shared_ptr<MapData> md;
+      importMap(gdi, md, oe);
+      if (!md->isGeoReferenced()) {
+        try {
+          locateMap(gdi);
+          return 0;
+        }
+        catch (const meosException &) {
+          gdi.clearPage(false);
+        }
+      }
+      gdi.clearPage(true);
+      gdi.addString("", boldLarge, "Karta");
+      gdi.dropLine();
+      gdi.addButton("Cancel", "Stäng", CourseCB);
+      gdi.dropLine();
+
+      vector<tuple<oControl *, wstring, RenderCType>> crsRep;
+      int ypMap = gdi.getCY();
+      md->render(*oe, gdi, gdi.scaleLength(20), ypMap, crsRep, true, -1, -1);
+
+      gdi.refresh();
+    }
+    else if (bi.id == "CPoint") {
+      int no = bi.getExtraInt();
+      
+      class MH : public MouseHandler {
+        TabCourse *dst;
+        int number;
+      public:
+
+        MH(TabCourse *tc, int no) : dst(tc), number(no) {}
+
+        void mouseButton(gdioutput &gdi, 
+                         MouseHandler::MouseEvent event,
+                         int x, int y) const final {
+          dst->specifyControl(gdi, number, x, y);
+        }
+      };
+
+      gdi.setMouseHandler(make_shared<MH>(this, no));
+
+      gdi.setTextTranslate("info", L"Placera ut kontroll X genom att klicka på kartan.#" + itow(no), true);
+    }
+    else if (bi.id == "GeoReference") {
+      gdi.clearMouseHandler();
+      auto &renderMaps = *oe->getRenderMaps();
+      vector<array<double, 4>> cpt;
+      for (auto [id, pos] : relCoordControl) {
+        pControl c = oe->getControl(id);
+        if (c) {
+          double refLat = c->getDCI().getDouble("latcrd");
+          double refLong = c->getDCI().getDouble("longcrd");
+          // long, lat, x, y (rel)
+         
+          cpt.emplace_back(array<double, 4>({ refLong, refLat, pos.first, pos.second }));
+        }
+      }
+      if (cpt.size() == 2) {
+        renderMaps.geoReference(0, cpt);
+        loadPage(gdi);
+      }
+      else
+        throw meosException("Internal error");
     }
     else if (bi.id == "DeleteAll") {
       if (!gdi.ask(L"Vill du ta bort alla banor från tävlingen?"))
@@ -493,10 +612,10 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       }
       loadPage(gdi);
     }
-    else if (bi.id=="ImportCourses") {
+    else if (bi.id == "ImportCourses") {
       setupCourseImport(gdi, CourseCB);
     }
-    else if (bi.id=="DoImportCourse") {
+    else if (bi.id == "DoImportCourse") {
       wstring filename = gdi.getText("FileName");
       if (filename.empty())
         return 0;
@@ -511,7 +630,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
           gdi.isChecked("AddClasses"),
           gdi.isChecked("CreateClasses"));
       }
-      catch (const std::exception &) {
+      catch (const std::exception&) {
         gdi.enableInput("DoImportCourse");
         gdi.enableInput("Cancel");
         gdi.enableInput("BrowseCourse");
@@ -536,7 +655,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       for (size_t k = 0; k < cls.size(); k++) {
         if (cls[k]->getCourseId() != courseId)
           continue;
-        if (!hasAsked &&oe->classHasResults(cls[k]->getId())) {
+        if (!hasAsked && oe->classHasResults(cls[k]->getId())) {
           hasAsked = true;
           if (!gdi.ask(L"warning:drawresult"))
             return 0;
@@ -557,7 +676,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
 
       gdi.fillRight();
       int firstStart = timeConstHour;
-      int interval = 2*timeConstMinute;
+      int interval = 2 * timeConstMinute;
       int vac = 1;
       gdi.addInput("FirstStart", oe->getAbsTime(firstStart), 10, 0, L"Första start:");
       gdi.addInput("Interval", formatTime(interval), 10, 0, L"Startintervall (min):");
@@ -592,19 +711,19 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
 
       for (size_t k = 1; k < courseDrawClasses.size(); k++) {
         vector<pRunner> r;
-        oe->getRunners(courseDrawClasses[k-1].classID, 0, r, false);
+        oe->getRunners(courseDrawClasses[k - 1].classID, 0, r, false);
         int vacDelta = vacances;
         for (size_t i = 0; i < r.size(); i++) {
-          if (r[i]->isVacant()) 
+          if (r[i]->isVacant())
             vacDelta--;
         }
 
-        courseDrawClasses[k].firstStart = courseDrawClasses[k-1].firstStart + (r.size() + vacDelta) * iv;
+        courseDrawClasses[k].firstStart = courseDrawClasses[k - 1].firstStart + (r.size() + vacDelta) * iv;
         courseDrawClasses[k].vacances = vacances;
         courseDrawClasses[k].interval = iv;
       }
 
-      oe->drawList(courseDrawClasses, method, 1, oEvent::DrawType::DrawAll); 
+      oe->drawList(courseDrawClasses, method, 1, oEvent::DrawType::DrawAll);
 
       oe->addAutoBib();
 
@@ -614,24 +733,24 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       oListParam par;
       oListInfo info;
       par.listCode = EStdStartList;
-      for (size_t k=0; k<courseDrawClasses.size(); k++)
+      for (size_t k = 0; k < courseDrawClasses.size(); k++)
         par.selection.insert(courseDrawClasses[k].classID);
 
       oe->generateListInfo(gdi, par, info);
       oe->generateList(gdi, false, info, true);
       gdi.refresh();
     }
-    else if (bi.id=="Add") {
-      if (courseId>0) {
+    else if (bi.id == "Add") {
+      if (courseId > 0) {
         wstring ctrl = gdi.getText("Controls");
         wstring name = gdi.getText("Name");
         pCourse pc = oe->getCourse(courseId);
-        if (pc && !name.empty() && !ctrl.empty() &&  pc->getControlsUI() != ctrl) {
+        if (pc && !name.empty() && !ctrl.empty() && pc->getControlsUI() != ctrl) {
           if (name == pc->getName()) {
             // Make name unique if same name
             int len = name.length();
-            if (len > 2 && (isdigit(name[len-1]) || isdigit(name[len-2]))) {
-              ++name[len-1]; // course 1 ->  course 2, course 1a -> course 1b
+            if (len > 2 && (isdigit(name[len - 1]) || isdigit(name[len - 2]))) {
+              ++name[len - 1]; // course 1 ->  course 2, course 1a -> course 1b
             }
             else
               name += L" 2";
@@ -653,9 +772,9 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       gdi.setInputFocus("Name", true);
       addedCourse = true;
     }
-    else if (bi.id=="Remove"){
+    else if (bi.id == "Remove") {
       DWORD cid = courseId;
-      if (cid==0)
+      if (cid == 0)
         throw meosException("Ingen bana vald.");
 
       if (oe->isCourseUsed(cid))
@@ -670,7 +789,7 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
     else if (bi.id == "FirstAsStart" || bi.id == "LastAsFinish") {
       refreshCourse(gdi.getText("Controls"), gdi);
     }
-    else if (bi.id=="Cancel"){
+    else if (bi.id == "Cancel") {
       loadPage(gdi);
     }
   }
@@ -714,8 +833,8 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
 
       gdi.setInputStatus("PointReduction", !pr.empty());
       gdi.setInputStatus("ReductionPerMinute", !pr.empty());
+      gdi.setInputStatus("AllowLatePoints", !pr.empty());
       gdi.setText("PointReduction", pr);
-
     }
   }
   else if (type == GUI_INPUT) {
@@ -745,6 +864,88 @@ int TabCourse::courseCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
     return true;
   }
   return 0;
+}
+
+void TabCourse::locateMap(gdioutput &gdi) {
+  vector<pControl> cList;
+  oe->getControls(cList, false);
+
+  double minLat = 1000;
+  pControl minC = nullptr;
+  for (pControl c : cList) {
+    if (oControl::isSpecialControl(c->getStatus()))
+      continue;
+
+    double latc = c->getDCI().getDouble("latcrd");
+    if (latc != 0.0 && latc < minLat) {
+      minLat = latc;
+      minC = c;
+    }
+  }
+
+  if (minC == nullptr) {
+    throw meosException("Kontroller med koordinater saknas.");
+  }
+  double refLat = minC->getDCI().getDouble("latcrd");
+  double refLong = minC->getDCI().getDouble("longcrd");
+  double bestD = 0;
+  pControl maxC = nullptr;
+
+  for (pControl c : cList) {
+    if (oControl::isSpecialControl(c->getStatus()))
+      continue;
+
+    double latc = c->getDCI().getDouble("latcrd");
+    double longc = c->getDCI().getDouble("longcrd");
+    if (latc == 0.0)
+      continue;
+
+    double d = std::abs(latc - refLat) * std::abs(longc - refLong);
+
+    if (d > bestD) {
+      bestD = d;
+      maxC = c;
+    }
+  }
+
+  if (maxC == nullptr) {
+    throw meosException("Kontroller med koordinater saknas.");
+  }
+
+  gdi.clearPage(false);
+  gdi.pushX();
+  gdi.addString("", boldLarge, "Passa in kartan mot kontroller");
+  gdi.dropLine(0.5);
+  gdi.addString("", 10, "info:geolocate");
+  gdi.fillRight();
+  gdi.dropLine(0.5);
+  gdi.addButton("CPoint", L"Kontroll X#" + minC->getName(), CourseCB).setAbsPos().setExtra(minC->getId());
+  gdi.addButton("CPoint", L"Kontroll X#" + maxC->getName(), CourseCB).setAbsPos().setExtra(maxC->getId());
+  gdi.addButton("GeoReference", "Spara inpassning", CourseCB).setAbsPos();
+  
+  gdi.addButton("AddMap", "Importera ny karta", CourseCB).setAbsPos();
+
+  gdi.addButton("Cancel", "Avbryt", CourseCB).setAbsPos();
+  relCoordControl.clear();
+
+  gdi.setInputStatus("GeoReference", false);
+
+  gdi.dropLine(3);
+  gdi.fillDown();
+  gdi.popX();
+  gdi.addString("info", 0, "Välj kontroll ovan och markera på kartan.");
+  auto &renderMaps = *oe->getRenderMaps();
+
+  vector<tuple<oControl *, wstring, RenderCType>> crsRep;
+  int ypMap = gdi.getCY();
+  mapRectangle.left = gdi.scaleLength(20);
+  mapRectangle.top = ypMap;
+
+  auto [xpmap, ymap_b] = renderMaps.render(*oe, gdi, mapRectangle.left, ypMap, crsRep, true);
+
+  mapRectangle.right = xpmap;
+  mapRectangle.bottom = ymap_b;
+  gdi.refresh();
 }
 
 bool TabCourse::loadPage(gdioutput &gdi) {
@@ -786,21 +987,41 @@ bool TabCourse::loadPage(gdioutput &gdi) {
 
   oe->fillCourses(gdi, "Courses", {}, false);
 
-  gdi.dropLine(0.7);
+  gdi.dropLine(0.5);
+  int cx = gdi.getCX();
+  int cy = gdi.getCY();
+  gdi.setCX(cx + gdi.scaleLength(7));
   gdi.pushX();
-  gdi.addString("", boldText, "Funktioner");
-  gdi.dropLine();
+  gdi.dropLine(0.5);
+
+  gdi.addString("", fontMediumPlus, "Funktioner");
+  gdi.dropLine(0.3);
   gdi.fillRight();
   gdi.addButton("ImportCourses", "Importera från fil...", CourseCB);
   gdi.addButton("ExportCourses", "Exportera...", CourseCB);
   gdi.popX();
   gdi.dropLine(2.5);
 
+  if (oe->getRenderMaps()) {
+    gdi.addButton("LocateMap", "Justera karta...", CourseCB);
+  }
+  else {
+    gdi.addButton("AddMap", "Lägg till karta...", CourseCB);
+  }
+
   if (oe->getMeOSFeatures().hasFeature(MeOSFeatures::DrawStartList)) {
     gdi.addButton("DrawCourse", "Lotta starttider..", CourseCB);
     gdi.disableInput("DrawCourse");
+    gdi.popX();
+    gdi.dropLine(2.5);
   }
+
   gdi.addButton("DeleteAll", "Radera alla...", CourseCB);
+  gdi.dropLine(2.5);
+
+  int by = gdi.getCY();
+  int ly = gdi.getWidth();
+  gdi.addRectangle(cx, cy, ly, by, GDICOLOR::colorLightBlue);
 
   gdi.newColumn();
   gdi.fillDown();
@@ -813,11 +1034,17 @@ bool TabCourse::loadPage(gdioutput &gdi) {
   gdi.pushX();
   gdi.fillRight();
   gdi.addInput("Name", L"", 20, 0, L"Namn:");
-  gdi.fillDown();
+  
   gdi.addInput("NumberMaps", L"", 6, 0, L"Antal kartor:");
   
+  gdi.dropLine(0.9);
+  if (oe->getRenderMaps()) {
+    gdi.addButton("ShowMap", "Karta", CourseCB);
+    gdi.disableInput("ShowMap");
+  }
+  gdi.dropLine(2.1);
   gdi.popX();
-
+  gdi.fillDown();
   vector<pCourse> allCrs;
   oe->getCourses(allCrs);
   size_t mlen = 0;
@@ -895,7 +1122,8 @@ bool TabCourse::loadPage(gdioutput &gdi) {
     rc.right = gdi.getCX() + 5;
     gdi.setCX(cx);
     gdi.fillDown();
-    gdi.addCheckbox("ReductionPerMinute", "Poängavdrag per påbörjad minut");
+    gdi.addCheckbox("ReductionPerMinute", "Poängavdrag per påbörjad minut").isEdit(false);
+    gdi.addCheckbox("AllowLatePoints", "Räkna poäng efter tidsgränsen").isEdit(false);
 
     rc.bottom = gdi.getCY() + 5;
     gdi.addRectangle(rc, colorLightBlue, true);
@@ -923,9 +1151,10 @@ bool TabCourse::loadPage(gdioutput &gdi) {
   return true;
 }
 
-void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
+void TabCourse::runCourseImport(gdioutput &gdi, const wstring &filename,
                                 oEvent *oe, bool addToClasses, bool createClasses) {
-  if (csvparser::iscsv(filename)  != csvparser::CSV::NoCSV) {
+  shared_ptr<MapData> readMapData;
+  if (csvparser::iscsv(filename) != csvparser::CSV::NoCSV) {
     gdi.fillRight();
     gdi.pushX();
     gdi.addString("", 0, "Importerar OCAD csv-fil...");
@@ -1002,8 +1231,8 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
     pair<string, string> noType;
     int classIdOffset = 0;
     int courseIdOffset = 0;
-    oe->importXML_EntryData(gdi, filename.c_str(), addToClasses, false, 
-                             noFilter, classIdOffset, courseIdOffset, noType);
+    oe->importXML_EntryData(gdi, filename.c_str(), addToClasses, false,
+                            noFilter, classIdOffset, courseIdOffset, noType, readMapData);
   }
   if (addToClasses) {
     // There is specific course-class matching inside the import of each format,
@@ -1026,11 +1255,11 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
         map<wstring, pCourse>::iterator res = name2Course.find(cls[k]->getName());
         if (res != name2Course.end()) {
           usedCrs.push_back(res->second);
-          if (cls[k]->getNumStages()==0) {
+          if (cls[k]->getNumStages() == 0) {
             cls[k]->setCourse(res->second);
           }
           else {
-            for (size_t i = 0; i<cls[k]->getNumStages(); i++)
+            for (size_t i = 0; i < cls[k]->getNumStages(); i++)
               cls[k]->addStageCourse(i, res->second->getId(), -1);
           }
         }
@@ -1051,11 +1280,11 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
         bestClass->getCourses(-1, usedCrs);
         if (usedCrs.empty()) {
           course2Class[crs[k]->getId()].push_back(bestClass);
-          if (bestClass->getNumStages()==0) {
+          if (bestClass->getNumStages() == 0) {
             bestClass->setCourse(crs[k]);
           }
           else {
-            for (size_t i = 0; i<bestClass->getNumStages(); i++)
+            for (size_t i = 0; i < bestClass->getNumStages(); i++)
               bestClass->addStageCourse(i, crs[k]->getId(), -1);
           }
         }
@@ -1071,7 +1300,7 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
       cls[k]->getCourses(-1, usedCrs);
       wstring c;
       for (size_t j = 0; j < usedCrs.size(); j++) {
-        if (j>0)
+        if (j > 0)
           c += L", ";
         c += usedCrs[j]->getName();
       }
@@ -1091,7 +1320,7 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
       wstring c;
       vector<pClass> usedCls = course2Class[crs[k]->getId()];
       for (size_t j = 0; j < usedCls.size(); j++) {
-        if (j>0)
+        if (j > 0)
           c += L", ";
         c += usedCls[j]->getName();
       }
@@ -1133,17 +1362,48 @@ void TabCourse::runCourseImport(gdioutput& gdi, const wstring &filename,
       }
     }
   }
-  
-  gdi.addButton(gdi.getWidth()+20, 45,  gdi.scaleLength(baseButtonWidth),
+
+  if (gdi.isChecked("ImportMap")) {
+    importMap(gdi, readMapData, oe);
+  }
+
+  gdi.addButton(gdi.getWidth() + 20, 45, gdi.scaleLength(baseButtonWidth),
                 "Print", "Skriv ut...", CourseCB,
                 "Skriv ut listan.", true, false);
-  gdi.addButton(gdi.getWidth()+20, 75,  gdi.scaleLength(baseButtonWidth),
+  gdi.addButton(gdi.getWidth() + 20, 75, gdi.scaleLength(baseButtonWidth),
                 "PDF", "PDF...", CourseCB,
                 "Spara som PDF.", true, false);
 
   gdi.setWindowTitle(oe->getTitleName());
   oe->updateTabs();
   gdi.refresh();
+}
+
+void TabCourse::importMap(gdioutput &gdi, shared_ptr<MapData> &readMapData, oEvent *oe) {
+  const wstring &mapImg = gdi.getText("MapFileName");
+  if (!mapImg.empty()) {
+    uint64_t id = image.loadFromFile(mapImg, Image::ImageMethod::Default);
+
+    const wstring &worldFile = gdi.getText("WorldFileName");
+
+    if (id != 0) {
+      if (!readMapData)
+        readMapData = make_shared<MapData>();
+
+      readMapData->setImage(id, true);
+
+      if (!worldFile.empty())
+        readMapData->readWorld(worldFile);
+
+      if (!oe->getRenderMaps())
+        oe->getRenderMaps() = make_shared<MapDataContainer>();
+      else
+        oe->getRenderMaps()->clear(); // We will only support one map for now
+
+      oe->getRenderMaps()->add(readMapData);
+      oe->saveImage(id);
+    }
+  }
 }
 
 void TabCourse::setupCourseImport(gdioutput& gdi, GUICALLBACK cb) {
@@ -1160,10 +1420,27 @@ void TabCourse::setupCourseImport(gdioutput& gdi, GUICALLBACK cb) {
   gdi.fillDown();
   gdi.addButton("BrowseCourse", "Bläddra...", CourseCB);
 
-  gdi.dropLine(0.5);
+  gdi.fillRight();
   gdi.popX();
 
-  gdi.fillDown();
+  class HandleMap : public GuiHandler {
+  public:
+    void handle(gdioutput& gdi, BaseInfo& info, GuiEventType type) final {
+      bool status = gdi.isChecked("ImportMap");
+      gdi.setInputStatus("MapFileName", status);
+      gdi.setInputStatus("WorldFileName", status);
+      gdi.setInputStatus("BrowseMap", status);
+      gdi.setInputStatus("BrowseWorld", status);
+    }
+  };
+  auto h = make_shared<HandleMap>();
+  BaseInfo &imp = gdi.addCheckbox("ImportMap", "Importera kartbild", nullptr, false).setHandler(h);
+  gdi.popX();
+  
+  addImportMapWidgets(gdi);
+
+  h->handle(gdi, imp, GUI_BUTTON);
+
   gdi.addCheckbox("AddClasses", "Lägg till klasser", 0, true);
   gdi.addCheckbox("CreateClasses", "Skapa en klass för varje bana", 0, false);
 
@@ -1174,6 +1451,27 @@ void TabCourse::setupCourseImport(gdioutput& gdi, GUICALLBACK cb) {
   gdi.addButton("Cancel", "Avbryt", cb).setCancel();
   gdi.setInputFocus("FileName");
   gdi.popX();
+}
+
+void TabCourse::addImportMapWidgets(gdioutput &gdi) {
+  gdi.dropLine();
+  gdi.addInput("MapFileName", L"", 48, 0, L"Filnamn:");
+  gdi.dropLine();
+  gdi.fillDown();
+  gdi.addButton("BrowseMap", "Bläddra...", CourseCB);
+
+  gdi.popX();
+  gdi.fillRight();
+  gdi.addInput("WorldFileName", L"", 48, 0, L"World file:");
+  gdi.dropLine();
+  gdi.fillDown();
+  gdi.addButton("BrowseWorld", "Bläddra...", CourseCB);
+
+  gdi.dropLine(0.5);
+  gdi.popX();
+  gdi.fillDown();
+  gdi.addString("", 10, "info:worldfile");
+  gdi.dropLine(0.5);
 }
 
 void TabCourse::fillCourseControls(gdioutput &gdi, const wstring &ctrl) {
@@ -1339,7 +1637,7 @@ wstring TabCourse::encodeCourse(const wstring &in, bool rogaining, bool firstSta
     }
 
     if (pcnt > 0)
-      out += L" = " + itow(pcnt) + L"p";
+      out += L", \u03A3 = " + oe->formatScore(pcnt) + L"p";
   }
   return out;
 }
@@ -1354,3 +1652,141 @@ const wstring &TabCourse::formatControl(int id, wstring &bf) const {
     return itow(id);
 }
 
+void TabCourse::showMap(oEvent *oe, gdioutput& gdi, pCourse crs, const wstring &title, double zoomLevel) {
+  if (!crs || !oe->getRenderMaps())
+    return;
+  bool created = false;
+  static int mapWX = -1;
+  static int mapWY = -1;
+  const double fixedPrec = 100000000.0;
+  gdioutput* mapWindow = getExtraWindow("mapwindow", true);
+  if (mapWindow == nullptr) {
+    mapWindow = createExtraWindow("mapwindow", lang.tl("Karta"), gdi.scaleLength(550), gdi.scaleLength(350), true);
+    created = true;
+  }
+  else {
+    if (zoomLevel == .0) {
+      double ms = mapWindow->getDataInt("mapscale");
+      zoomLevel = double(ms) / fixedPrec;
+    }
+  }
+  if (zoomLevel < 1.0)
+    zoomLevel = 1.0;
+
+  mapWindow->clearPage(false);
+  mapWindow->setData("mapscale", int(zoomLevel * fixedPrec));
+  mapWindow->hideBackground(true);
+  mapWindow->addStringUT(boldLarge, title);
+
+  class ZoomMap : public GuiHandler {
+    oEvent *oe;
+    wstring title;
+    int crsId;
+    double zoomLevel;
+  public: 
+    ZoomMap(oEvent *oe, double zoomLevel, const wstring &title, int crsId) : oe(oe), title(title), 
+                                                                             crsId(crsId), zoomLevel(zoomLevel){}
+    void handle(gdioutput &gdi, BaseInfo &info, GuiEventType type) override {
+      double factor = info.id == "ZoomIn" ? 1.5 : 1.0 / 1.5;
+      //gdi.scaleSize(factor);
+      pCourse crs = oe->getCourse(crsId);
+      if (crs) {
+        showMap(oe, gdi, crs, title, zoomLevel * factor);
+      }
+    }
+  };
+
+  int dx = 0;
+  int dy = 0;
+  int button_w = mapWindow->scaleLength(130);
+  if (zoomLevel < 6) {
+    mapWindow->addButton(dx, dy, button_w / 6, "ZoomIn", "+", nullptr, "Zooma in (Ctrl + '+')", false, false).
+      fixedCorner().setHandler(make_shared<ZoomMap>(oe, zoomLevel, title, crs->getId()));
+    dx += button_w / 6;
+  }
+  if (zoomLevel > 1.001) {
+    mapWindow->addButton(dx, dy, button_w / 6, "ZoomOut", makeDash(L"-"), nullptr, L"Zooma ut (Ctrl + '-')", false, false).
+      fixedCorner().setHandler(make_shared<ZoomMap>(oe, zoomLevel, title, crs->getId()));
+  }
+  //mapWindow->addButton("Zoom", L"+", nullptr, L"").setHandler(make_shared<ZoomMap>(oe, title, crs->getId(), zoomLevel));
+  auto& renderMaps = *oe->getRenderMaps();
+
+  vector<tuple<oControl*, wstring, RenderCType>> crsRep;
+
+  int start = crs->getStartId();
+  int finish = crs->getFinishId();
+  int ypMap = mapWindow->getCY();
+
+  if (start)
+    crsRep.emplace_back(oe->getControl(start), L"", RenderCType::Start);
+
+  for (int i = 0; i < crs->getNumControls(); i++) {
+    pControl ctrl = crs->getControl(i);
+    if (ctrl) {
+      crsRep.emplace_back(ctrl, itow(i + 1), RenderCType::CourseControl);
+    }
+  }
+  if (finish)
+    crsRep.emplace_back(oe->getControl(finish), L"", RenderCType::Finish);
+
+  int xw, yw;
+  mapWindow->getTargetDimension(xw, yw);
+  int maxWidth = max<int>(gdi.scaleLength(600), int(zoomLevel * xw));
+  int maxHeight = max<int>(gdi.scaleLength(600), int(zoomLevel * (yw-ypMap)));
+
+  auto [xpmap, ymap_b] = renderMaps.render(*oe, *mapWindow, gdi.scaleLength(40),
+                                           ypMap, crsRep, false, maxWidth, maxHeight);
+
+  RECT rc;
+  mapWindow->getWindowsPosition(rc);
+  int wx = rc.right - rc.left;
+  int wy = rc.bottom - rc.top;
+
+  if (created || (wx == mapWX && wy == mapWY)) {
+    rc.right = rc.left + xpmap + gdi.scaleLength(50);
+    rc.bottom = rc.top + ymap_b + gdi.scaleLength(80);
+    mapWindow->setWindowsPosition(rc);
+
+    mapWX = rc.right - rc.left;
+    mapWY = rc.bottom - rc.top;
+  }
+
+  mapWindow->refresh();
+}
+
+bool TabCourse::specifyControl(gdioutput &gdi, int controlId, int x, int y) {
+  //string crd = itos(x - mapRectangle.left) + "," + itos(y - mapRectangle.top);
+  //gdi.addStringUT(y, x, 0, crd);
+  wstring label = itow(controlId);
+  string tag = itos(controlId);
+  auto mr = gdi.getMapRenderer();
+  if (mr) {
+    int dx = x - mapRectangle.left;
+    int dy = y - mapRectangle.top;
+    double relX = dx / double(mapRectangle.right - mapRectangle.left);
+    double relY = dy / double(mapRectangle.bottom - mapRectangle.top);
+    if (relX > 0 && relX < 1 && relY > 0 && relY < 1) {
+      mr->addNamedControl(tag, relX, relY, label);
+      bool wasOK = relCoordControl.size() > 1;
+      relCoordControl[controlId] = make_pair(relX, relY);
+      bool isOK = relCoordControl.size() > 1;
+      gdi.setInputStatus("GeoReference", isOK);
+      gdi.refreshFast();
+      if (!wasOK && isOK) 
+        gdi.setTextTranslate("info", L"Du kan justera kontrollplaceringarna genom att välja kontrollen igen. Spara när du är nöjd.", true);
+
+      return true;
+    }
+  }
+
+  return false;
+}
+
+wstring TabCourse::browseForCourse(gdioutput &gdi) {
+  vector<pair<wstring, wstring>> ext;
+  ext.emplace_back(L"Alla banfiler", L"*.xml;*.csv;*.txt");
+  ext.emplace_back(L"Banor, OCAD semikolonseparerat", L"*.csv;*.txt");
+  ext.emplace_back(L"Banor, IOF (xml)", L"*.xml");
+  wstring file = gdi.browseForOpen(ext, L"xml");
+  return file;
+}

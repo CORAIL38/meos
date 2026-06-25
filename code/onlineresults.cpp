@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,20 +22,16 @@
 
 #include "stdafx.h"
 
-#include "resource.h"
-
-#include <commctrl.h>
-#include <commdlg.h>
 #include <sys/stat.h>
+#include <shellapi.h>
 
 #include "oEvent.h"
 #include "gdioutput.h"
 
 #include "onlineresults.h"
+#include "onlineinput.h"
 #include "meos_util.h"
-#include <shellapi.h>
 
-#include "gdiconstants.h"
 #include "infoserver.h"
 #include "meosException.h"
 #include "Download.h"
@@ -72,7 +68,7 @@ static int OnlineCB(gdioutput *gdi, GuiEventType type, BaseInfo* data) {
 OnlineResults::OnlineResults() : AutoMachine("Onlineresultat", Machines::mOnlineResults), infoServer(nullptr), dataType(DataType::MOP20),
  zipFile(true), includeCourse(false),
  includeTotal(false), sendToURL(false), sendToFile(false),
- cmpId(0), exportCounter(1), bytesExported(0), lastSync(0) {
+ cmpId(L"0"), exportCounter(1), bytesExported(0), lastSync(0) {
 
 }
 
@@ -131,16 +127,35 @@ void OnlineResults::settings(gdioutput &gdi, oEvent &oe, State state) {
   gdi.popY();
   gdi.fillDown();
 
-
- // gdi.dropLine();
- // gdi.addInput("Interval", time, 10, 0, "Uppdateringsintervall (sekunder):");
-
   gdi.addSelection("Format", 200, 200, OnlineCB, L"Exportformat:");
   gdi.addItem("Format", L"MeOS Online Protocol XML 2.0", int(DataType::MOP20));
   gdi.addItem("Format", L"MeOS Online Protocol XML 1.0", int(DataType::MOP10));
   gdi.addItem("Format", L"IOF XML 3.0", int(DataType::IOF3));
   gdi.addItem("Format", L"IOF XML 2.0.3", int(DataType::IOF2));
   gdi.selectItemByData("Format", int(dataType));
+
+  class HandleCmpName : public GuiHandler {
+    const oEvent& oe;
+  public:
+    HandleCmpName(const oEvent& oe) : oe(oe) {}
+
+    void handle(gdioutput& gdi, BaseInfo& info, GuiEventType type) final {
+      InputInfo& ii = dynamic_cast<InputInfo&>(info);
+      GDICOLOR c = ii.text.empty() || ii.text == oe.getName() ?
+         GDICOLOR::colorDefault : GDICOLOR::colorLightCyan;
+
+      if (c != ii.getBgColor()) {
+        ii.setBgColor(c);
+        ii.refresh();
+      }
+    }
+  };
+
+  auto cmp = getCompetitionName(oe);
+  auto& nameField = gdi.addInput("CmpName", cmp.first, 30, nullptr, L"Tävlingsnamn för export:");
+  if (cmp.second)
+    nameField.setBgColor(GDICOLOR::colorLightCyan);
+  nameField.setHandler(make_shared<HandleCmpName>(oe));
 
   gdi.addCheckbox("IncludeCourse", "Inkludera bana", 0, includeCourse);
 
@@ -161,7 +176,7 @@ void OnlineResults::settings(gdioutput &gdi, oEvent &oe, State state) {
   gdi.addInput("URL", url, 40, 0, L"", L"Till exempel X#http://www.results.org/online.php");
   gdi.dropLine(2.5);
   gdi.popX();
-  gdi.addInput("CmpID", itow(cmpId), 10, 0, L"Tävlingens ID-nummer:");
+  gdi.addInput("CmpID", cmpId, 10, 0, L"Tävlingens ID-nummer:");
   gdi.addInput("Password", passwd, 15, 0, L"Lösenord:").setPassword(true);
 
   enableURL(gdi, sendToURL);
@@ -203,7 +218,7 @@ void OnlineResults::settings(gdioutput &gdi, oEvent &oe, State state) {
   vector<pControl> ctrl;
   oe.getControls(ctrl, true);
 
-  vector< pair<pControl, int> > ctrlP;
+  vector<pair<pControl, int>> ctrlP;
   for (size_t k = 0; k< ctrl.size(); k++) {
     for (int i = 0; i < ctrl[k]->getNumberDuplicates(); i++) {
       ctrlP.push_back(make_pair(ctrl[k], oControl::getCourseControlIdFromIdIndex(ctrl[k]->getId(), i)));
@@ -224,6 +239,8 @@ void OnlineResults::settings(gdioutput &gdi, oEvent &oe, State state) {
                     name, 0, controls.count(ctrlP[k].second) != 0);
   }
   gdi.dropLine();
+
+  gdi.addCheckbox("SendCard", "Skicka alla sträcktider efter brickavläsning", nullptr, sendCompleteCard);
 
   rc.top = gdi.getCY();
   rc.bottom = rc.top + 3;
@@ -269,10 +286,14 @@ void OnlineResults::save(oEvent &oe, gdioutput &gdi, bool doProcess) {
   if (!xurl.empty())
     oe.setProperty("MOPURL", xurl);
 
+  storedName = gdi.getText("CmpName");
+  if (storedName == oe.getName() || trim(storedName).empty())
+    storedName = L""; // Use default
+
   sendToURL = gdi.isChecked("ToURL");
   sendToFile = gdi.isChecked("ToFile");
 
-  cmpId = gdi.getTextNo("CmpID");
+  cmpId = OnlineInput::sanitizeId(gdi.getText("CmpID"));
   passwd = gdi.getText("Password");
   prefix = px;
   exportScript = gdi.getText("ExportScript");
@@ -348,6 +369,8 @@ void OnlineResults::save(oEvent &oe, gdioutput &gdi, bool doProcess) {
     }
   }
 
+  sendCompleteCard = gdi.isChecked("SendCard");
+
   if (doProcess) {
     process(gdi, &oe, SyncNone);
     interval = iv;
@@ -411,7 +434,21 @@ void OnlineResults::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
     InfoCompetition& ic = getInfoServer();
     xmlbuffer xmlbuff;
     if (dataType == DataType::MOP10 || dataType == DataType::MOP20) {
-      if (ic.synchronize(*oe, false, classes, controls, dataType != DataType::MOP10)) {
+      set<int> useCtrlSet;
+      if (sendCompleteCard) {
+        vector<pControl> ctrl;
+        oe->getControls(ctrl, true);
+        for (size_t k = 0; k < ctrl.size(); k++) {
+          for (int i = 0; i < ctrl[k]->getNumberDuplicates(); i++) {
+            useCtrlSet.insert(oControl::getCourseControlIdFromIdIndex(ctrl[k]->getId(), i));
+          }
+        }
+      }
+      else
+        useCtrlSet = controls;
+
+      if (ic.synchronize(*oe, getCompetitionName(*oe).first, InfoCompetition::SynchType::All, 
+                         classes, useCtrlSet, controls, dataType != DataType::MOP10)) {
         lastSync = tick; // If error, avoid to quick retry
         ic.getDiffXML(xmlbuff);
       }
@@ -420,10 +457,10 @@ void OnlineResults::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
       t = getTempFile();
       if (dataType == DataType::IOF2)
         oe->exportIOFSplits(oEvent::IOF20, t.c_str(), false, false,
-          classes, make_pair("", ""), -1, false, false, true, true, false, false);
+          classes, make_tuple("", "", true), getCompetitionName(*oe).first, -1, false, false, true, true, false, false);
       else if (dataType == DataType::IOF3)
         oe->exportIOFSplits(oEvent::IOF30, t.c_str(), false, false,
-          classes, make_pair("", ""), -1, true, false, true, true, false, false);
+          classes, make_tuple("", "", true), getCompetitionName(*oe).first, -1, true, false, true, true, false, false);
       else
         throw meosException("Internal error");
     }
@@ -468,11 +505,10 @@ void OnlineResults::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
         Download dwl;
         dwl.initInternet();
         ProgressWindow pw(nullptr, gdi.getScale());
-        vector<pair<wstring, wstring> > key;
-        pair<wstring, wstring> mk1(L"competition", itow(cmpId));
-        key.push_back(mk1);
-        pair<wstring, wstring> mk2(L"pwd", passwd);
-        key.push_back(mk2);
+        vector<pair<wstring, wstring>> key;
+        key.emplace_back(L"competition", OnlineInput::sanitizeId(cmpId));
+        if (!passwd.empty())
+          key.emplace_back(L"pwd", passwd);
 
         bool addedHeader = false;
         bool forceZIP = false;
@@ -508,13 +544,11 @@ void OnlineResults::process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) {
           if (!addedHeader) {
             if (wasZip) {
               forceZIP = true;
-              pair<wstring, wstring> mk3(L"Content-Type", L"application/zip");
-              key.push_back(mk3);
+              key.emplace_back(L"Content-Type", L"application/zip");
             }
             else {
               forceNoZip = true;
-              pair<wstring, wstring> mk3(L"Content-Type", L"text/plain");
-              key.push_back(mk3);
+              key.emplace_back(L"Content-Type", L"text/plain");
             }
             addedHeader = true;
           }
@@ -608,6 +642,13 @@ wstring OnlineResults::getExportFileName() const {
   return bf;
 }
 
+pair<wstring, bool> OnlineResults::getCompetitionName(const oEvent& oe) const {
+  if (storedName.empty())
+    return make_pair(oe.getName(), false);
+  else
+    return make_pair(storedName, true);
+}
+
 void OnlineResults::saveMachine(oEvent &oe, const wstring &guiInterval) {
   AutoMachine::saveMachine(oe, guiInterval);
   auto &cnt = oe.getMachineContainer().set(getTypeString(), getMachineName());
@@ -624,6 +665,7 @@ void OnlineResults::saveMachine(oEvent &oe, const wstring &guiInterval) {
   
   cnt.set("classes", classes);
   cnt.set("controls", controls);
+  cnt.set("card", sendCompleteCard);
 
   cnt.set("dt", int(dataType));
   cnt.set("zip", zipFile);
@@ -632,6 +674,8 @@ void OnlineResults::saveMachine(oEvent &oe, const wstring &guiInterval) {
   cnt.set("doURL", sendToURL);
   cnt.set("doFile", sendToFile);
   cnt.set("script", exportScript);
+  if (!storedName.empty())
+    cnt.set("cname", storedName);
 }
 
 void OnlineResults::loadMachine(oEvent &oe, const wstring &name) {
@@ -648,11 +692,11 @@ void OnlineResults::loadMachine(oEvent &oe, const wstring &name) {
   string pwProp = "@respwd" + gdioutput::narrow(getMachineName());
   passwd = gdioutput::fromUTF8(oe.getPropertyStringDecrypt(pwProp.c_str(), ""));
 
-  cmpId = cnt->getInt("cmp");
+  cmpId = cnt->getString("cmp");
 
   classes = cnt->getSetInt("classes");
   controls = cnt->getSetInt("controls");
-
+  sendCompleteCard = cnt->getInt("card") != 0;
   dataType = DataType(cnt->getInt("dt"));
   zipFile = cnt->getInt("zip") != 0;
   includeTotal = cnt->getInt("tot") != 0;
@@ -660,4 +704,6 @@ void OnlineResults::loadMachine(oEvent &oe, const wstring &name) {
   sendToURL = cnt->getInt("doURL") != 0;
   sendToFile = cnt->getInt("doFile") != 0;
   exportScript = cnt->getString("script");
+  storedName = cnt->getString("cname");
 }
+

@@ -7,7 +7,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,10 +30,10 @@
 #include "meos_util.h"
 class oEvent;
 class oCourse;
-class oPunch : public oBase
-{
-protected:
+class oControl;
 
+class oPunch : public oBase {
+protected:
   int type = 0;
   int punchTime = 0;
   int punchUnit = 0;
@@ -65,6 +65,8 @@ protected:
   mutable int previousPunchTime; /// Note that this is not valid in general
 
 public:
+
+  const oControl *getRogainingControl(const oCourse &crs) const;
 
   int getPunchUnit() const { return punchUnit; }
   void setPunchUnit(int unit);

@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -452,7 +452,7 @@ void TabCompetition::createCompetition(gdioutput &gdi) {
   else {
     openCompetition(gdi, baseOnId);
     wstring cmpCopy = getTempFile();
-    oe->save(cmpCopy, false);
+    oe->save(cmpCopy, false, false);
     wstring rawName = oe->getName();
     size_t posPar = rawName.find_first_of('(');
     if (posPar != string::npos)

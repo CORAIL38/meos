@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@
 #include "subcommand.h"
 
 class Toolbar;
+class MapDataRenderer;
 
 class gdioutput;
 class oEvent;
@@ -117,6 +118,8 @@ protected:
 
   list<TextInfo> TL;
 
+  shared_ptr<MouseHandler> mouseHandler;
+
   //True if textlist has increasing y-values so
   //that we can optimize rendering.
   bool renderOptimize;
@@ -144,6 +147,7 @@ protected:
   list<RectangleInfo> Rectangles;
   list<TableInfo> Tables;
   list<TimerInfo> timers;
+  shared_ptr<MapDataRenderer> renderMap;
 
   Toolbar* toolbar;
   ToolList toolTips;
@@ -312,6 +316,9 @@ public:
     monitorConfiguration.push_back(rc);
   }
 
+  void setMouseHandler(shared_ptr<MouseHandler> mh) { mouseHandler = mh; }
+  void clearMouseHandler() { mouseHandler.reset(); }
+
   AutoCompleteInfo& addAutoComplete(const string& key);
   void clearAutoComplete(const string& key);
   bool hasAutoComplete() const { return autoCompleteInfo != nullptr; }
@@ -421,6 +428,7 @@ public:
 
   int getButtonHeight() const;
   int scaleLength(int input) const { return int(scale * input + 0.5); }
+  int scaleLength(double input) const { return int(scale * input + 0.5); }
 
   // Fill in current printer settings
   void fetchPrinterSettings(PrinterObject& po) const;
@@ -475,8 +483,18 @@ public:
   wstring browseForFolder(const wstring& folderStart, const wchar_t* descr);
 
   bool clipOffset(int PageX, int PageY, int& MaxOffsetX, int& MaxOffsetY);
-  RectangleInfo& addRectangle(const RECT& rc, GDICOLOR Color = GDICOLOR(-1),
-    bool DrawBorder = true, bool addFirst = false);
+
+  /** Set map decoration renderer*/
+  void setMapRenderer(shared_ptr<MapDataRenderer>& rdr);
+
+  /** Get map decoration renderer*/
+  MapDataRenderer *getMapRenderer() const;
+
+  RectangleInfo &addRectangle(const RECT &rc, GDICOLOR color = GDICOLOR(-1),
+                              bool drawBorder = true, bool addFirst = false);
+
+  RectangleInfo &addRectangle(int left, int top, int right, int bottom, GDICOLOR Color = GDICOLOR(-1),
+                              bool drawBorder = true, bool addFirst = false);
 
   RectangleInfo& getRectangle(const char* id);
 
@@ -764,6 +782,11 @@ public:
                         const wstring& tooltip, 
                         bool absPos, bool hasState);
 
+  ButtonInfo& addImageButton(int x, int y, int width, int height,
+                             const string& id, int imgId, GUICALLBACK cb,
+                             const wstring& tooltip,
+                             bool absPos, bool hasState);
+
   ButtonInfo& addCheckbox(const string& id, const wstring& text, GUICALLBACK cb = nullptr,
     bool Checked = true, const wstring& tooltip = L"");
   ButtonInfo& addCheckbox(int x, int y, const string& id,
@@ -845,11 +868,14 @@ public:
 
   TextInfo& addImage(const string& id, int format, const wstring& imageId,
     int width = 0, int height = 0, GUICALLBACK cb = nullptr) {
-    return addImage(id, getCY(), getCX(), format, imageId, width, height, cb);
+    return addImage(id, getCY(), getCX(), format, imageId, width, height, 0, 0, -1, -1, cb);
   }
 
   TextInfo& addImage(const string& id, int yp, int xp, int format, const wstring& imageId,
-    int width = 0, int height = 0, GUICALLBACK cb = nullptr);
+                     int width = 0, int height = 0, 
+                     int offsetX = 0, int offsetY = 0,
+                     int srcWidth = -1, int srcHeight = -1,
+                     GUICALLBACK cb = nullptr);
 
   TextInfo& addTimer(int yp, int xp, int format, int zeroTime, const wstring &textSrc = L"",
                      int xlimit = 0, GUICALLBACK cb = nullptr, 

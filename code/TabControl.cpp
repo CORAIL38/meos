@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,33 +22,24 @@
 
 #include "stdafx.h"
 
-#include "resource.h"
-
-#include <commctrl.h>
-#include <commdlg.h>
 #include <algorithm>
 
 #include "oEvent.h"
-#include "xmlparser.h"
 #include "gdioutput.h"
-#include "csvparser.h"
-#include "SportIdent.h"
 #include "meos_util.h"
-#include "gdifonts.h"
 #include "table.h"
 #include <cassert>
+#include "maprenderer.h"
 #include "MeOSFeatures.h"
+#include "meosexception.h"
 
 #include "TabControl.h"
 
-TabControl::TabControl(oEvent *poe):TabBase(poe)
-{
+TabControl::TabControl(oEvent *poe):TabBase(poe) {
   clearCompetitionData();
 }
 
-TabControl::~TabControl(void)
-{
-}
+TabControl::~TabControl(void) = default;
 
 void TabControl::selectControl(gdioutput &gdi,  pControl pc)
 {
@@ -66,6 +57,11 @@ void TabControl::selectControl(gdioutput &gdi,  pControl pc)
       gdi.setText("MinTime", makeDash(L"-"));
       gdi.setText("Point", L"");
       gdi.disableInput("Visitors");
+      if (pc->isAddedToEvent())
+        gdi.enableInput("Map", true);
+      else
+        gdi.disableInput("Map", true);
+      
       gdi.disableInput("Courses");
 
       controlId = pc->getId();
@@ -115,6 +111,7 @@ void TabControl::selectControl(gdioutput &gdi,  pControl pc)
       gdi.enableInput("Remove");
       gdi.enableInput("Save");
       gdi.enableInput("Visitors");
+      gdi.enableInput("Map", true);
       gdi.enableInput("Courses");
       gdi.enableEditControls(true);
 
@@ -146,6 +143,7 @@ void TabControl::selectControl(gdioutput &gdi,  pControl pc)
     gdi.disableInput("Save");
     gdi.disableInput("Visitors");
     gdi.disableInput("Courses");
+    gdi.disableInput("Map", true);
 
     gdi.enableEditControls(false);
   }
@@ -214,7 +212,7 @@ void TabControl::save(gdioutput &gdi) {
     else {
       if (gdi.hasWidget("Point")) {
         pc->setMinTime(0);
-        pc->setRogainingPoints(gdi.getTextNo("Point"));
+        pc->setRogainingPoints(gdi.getText("Point"));
       }
     }
   }
@@ -402,14 +400,14 @@ void TabControl::visitorTable(Table &table) const {
 }
 
 int TabControl::controlCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
-  if (type==GUI_BUTTON) {
-    ButtonInfo bi=*(ButtonInfo *)data;
+  if (type == GUI_BUTTON) {
+    ButtonInfo bi = *(ButtonInfo*)data;
 
-    if (bi.id=="Save")
+    if (bi.id == "Save")
       save(gdi);
-    else if (bi.id=="Add") {
+    else if (bi.id == "Add") {
       bool rogaining = false;
-      if (controlId>0) {
+      if (controlId > 0) {
         save(gdi);
         pControl pc = oe->getControl(controlId, false, true);
         rogaining = pc && (pc->getStatus() == oControl::ControlStatus::StatusRogaining || pc->getStatus() == oControl::ControlStatus::StatusRogainingRequired);
@@ -432,10 +430,10 @@ int TabControl::controlCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       gdi.setItems("Controls", d);
       selectControl(gdi, pc);
     }
-    else if (bi.id=="Remove") {
+    else if (bi.id == "Remove") {
 
       DWORD cid = controlId;
-      if (cid==0) {
+      if (cid == 0) {
         gdi.alert("Ingen kontroll vald vald.");
         return 0;
       }
@@ -450,11 +448,90 @@ int TabControl::controlCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
       gdi.setItems("Controls", d);
       selectControl(gdi, 0);
     }
-    else if (bi.id=="SwitchMode") {
+    else if (bi.id == "SwitchMode") {
       if (!tableMode)
         save(gdi);
       tableMode = !tableMode;
       loadPage(gdi);
+    }
+    else if (bi.id == "Map") {
+      pControl ctrl = oe->getControl(controlId);
+      if (!ctrl || !oe->getRenderMaps())
+        return 0;
+
+      if (!oe->getRenderMaps()->validCoordinates(*ctrl))
+        throw meosException("Kontrollen saknar giltiga koordinater");
+
+      gdioutput* mapWindow = getExtraWindow("mapwindow", true);
+      bool created = false;
+      if (mapWindow == nullptr) {
+        mapWindow = createExtraWindow("mapwindow", lang.tl("Karta"), gdi.scaleLength(400), gdi.scaleLength(350), true);
+        created = true;
+      }
+      mapWindow->clearPage(false);
+      mapWindow->hideBackground(true);
+      auto& renderMaps = *oe->getRenderMaps();
+      mapWindow->fillDown();
+      wstring name;
+      
+      wstring cid;
+      if (!oControl::isSpecialControl(ctrl->getStatus())) {
+        if (ctrl->hasName())
+          name = L" (" + ctrl->getName() + L")";
+        cid = itow(controlId);
+        name = L"Kontroll X#" + cid + name;
+      }
+      else if (ctrl->hasName()) {
+        name = ctrl->getName();
+        cid = name.substr(0, 1);
+        if (name.length() > 1)
+          cid += name.substr(name.length() - 1, 1);
+      }
+      else {
+        name = ctrl->getName();
+        cid = itow(controlId);
+      }
+
+      mapWindow->addString("", boldLarge, name);
+      mapWindow->dropLine();
+      int ypMap = mapWindow->getCY();
+      auto [xpmap, ymap_b] = renderMaps.render(*oe, *mapWindow, gdi.scaleLength(40), ypMap, {make_tuple(ctrl, cid, RenderCType::CorrectControl)});
+
+      int  dimx, dimy, xp, yp;
+      if (renderMaps.getCoordinatePosition(*ctrl, dimx, dimy, xp, yp)) {
+        int maxside = max(dimx, dimy);
+        double scale = double(gdi.scaleLength(200)) / double(maxside);
+        
+        RECT rcMap;
+        int xpMap = xpmap + gdi.scaleLength(20);
+        rcMap.top = ypMap;
+        rcMap.bottom = ypMap + int(scale * dimy);
+        rcMap.left = xpMap;
+        rcMap.right = xpMap + int(scale * dimx);
+
+        if (created) {
+          RECT rc;
+          mapWindow->getWindowsPosition(rc);
+
+          rc.right = rc.left + rcMap.right + gdi.scaleLength(50);
+          rc.bottom = rc.top + max<int>(rcMap.bottom, ymap_b) + gdi.scaleLength(80);
+          mapWindow->setWindowsPosition(rc);
+        }
+
+        RECT rcSubMap;
+        int cx = xpMap + int(scale * xp);
+        int cy = ypMap + int(scale * yp);
+        int siz = gdi.scaleLength(10);
+        rcSubMap.left = std::max<int>(cx - siz, rcMap.left);
+        rcSubMap.right = std::min<int>(cx + siz, rcMap.right);
+        rcSubMap.top = std::max<int>(cy - siz, rcMap.top);
+        rcSubMap.bottom = std::min<int>(cy + siz, rcMap.bottom);
+
+        mapWindow->addRectangle(rcMap, GDICOLOR::colorGreyBlue);
+        mapWindow->addRectangle(rcSubMap, GDICOLOR::colorLightBlue);
+      }
+
+      mapWindow->refresh();
     }
     else if (bi.id=="Visitors") {
       save(gdi);
@@ -608,6 +685,10 @@ bool TabControl::loadPage(gdioutput &gdi)
   gdi.disableInput("Remove");
   gdi.addButton("Courses", "Banor...", ControlsCB);
   gdi.addButton("Visitors", "Besökare...", ControlsCB);
+  
+  if (oe->getRenderMaps())
+    gdi.addButton("Map", "Karta", ControlsCB);
+
   gdi.addButton("Add", "Ny kontroll", ControlsCB);
 
   gdi.dropLine(2.5);

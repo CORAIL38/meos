@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -65,13 +65,13 @@ void RestService::save(oEvent &oe, gdioutput &gdi, bool doProcess) {
   }
 
   if (gdi.isChecked("AllowEntry")) {
-    RestServer::EntryPermissionType pt = (RestServer::EntryPermissionType)gdi.getSelectedItem("PermissionPerson").first;
-    RestServer::EntryPermissionClass pc = (RestServer::EntryPermissionClass)gdi.getSelectedItem("PermissionClass").first;
+    EntryPermissionType pt = (EntryPermissionType)gdi.getSelectedItem("PermissionPerson").first;
+    EntryPermissionClass pc = (EntryPermissionClass)gdi.getSelectedItem("PermissionClass").first;
     server->setEntryPermission(pc, pt);
   }
   else {
-    server->setEntryPermission(RestServer::EntryPermissionClass::None,
-                               RestServer::EntryPermissionType::None);
+    server->setEntryPermission(EntryPermissionClass::None,
+                               EntryPermissionType::None);
   }
 }
 
@@ -111,10 +111,10 @@ void RestService::settings(gdioutput &gdi, oEvent &oe, State state) {
   else {
     gdi.addString("", 0, "Server startad på X#" + itos(port));
     auto per = server->getEntryPermission();
-    if (get<RestServer::EntryPermissionType>(per) != RestServer::EntryPermissionType::None) {
+    if (get<EntryPermissionType>(per) != EntryPermissionType::None) {
       disablePermisson = false;
-      gdi.selectItemByData("PermissionPerson", size_t(get<RestServer::EntryPermissionType>(per)));
-      gdi.selectItemByData("PermissionClass", size_t(get<RestServer::EntryPermissionClass>(per)));
+      gdi.selectItemByData("PermissionPerson", size_t(get<EntryPermissionType>(per)));
+      gdi.selectItemByData("PermissionClass", size_t(get<EntryPermissionClass>(per)));
     }
   }
   if (disablePermisson) {

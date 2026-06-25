@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,37 +37,27 @@
 #include "TabBase.h"
 #include "TabCompetition.h"
 #include "TabAuto.h"
-#include "TabClass.h"
 #include "TabCourse.h"
 #include "TabControl.h"
 #include "TabSI.h"
 #include "TabList.h"
 #include "TabTeam.h"
 #include "TabSpeaker.h"
-#include "TabMulti.h"
 #include "TabRunner.h"
 #include "TabClub.h"
 #include "progress.h"
-#include "inthashmap.h"
 #include <cassert>
 #include "localizer.h"
-#include "intkeymap.hpp"
-#include "intkeymapimpl.hpp"
-#include "download.h"
 #include "meos_util.h"
-#include <sys/stat.h>
 #include "random.h"
 #include "metalist.h"
 #include "gdiconstants.h"
-#include "socket.h"
 #include "autotask.h"
 #include "meosexception.h"
 #include "parser.h"
 #include "restserver.h"
 #include "autocomplete.h"
 #include "image.h"
-#include "csvparser.h"
-#include "generalresult.h"
 
 int defaultCodePage = 1252;
 
@@ -221,7 +211,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
   RunnerStatusOrderMap[StatusCANCEL] = 7;
   RunnerStatusOrderMap[StatusDNS] = 8;
   RunnerStatusOrderMap[StatusUnknown] = 9;
-  RunnerStatusOrderMap[StatusNotCompetiting] = 10;
+  RunnerStatusOrderMap[StatusNotCompeting] = 10;
 
   GetCurrentDirectory(MAX_PATH, programPath);
 
@@ -294,8 +284,10 @@ int APIENTRY WinMain(HINSTANCE hInstance,
   lang.get().addLangResource(L"Français", L"110");
   lang.get().addLangResource(L"Español", L"111");
   lang.get().addLangResource(L"Russian", L"107");
-  lang.get().addLangResource(L"Ukrainian", L"112");
-  lang.get().addLangResource(L"Portuguese", L"113");
+  lang.get().addLangResource(L"українська", L"112");
+  lang.get().addLangResource(L"Português", L"113");
+  lang.get().addLangResource(L"български", L"114");
+  lang.get().addLangResource(L"Català", L"115");
 
   if (fileExists(L"extra.lng")) {
     lang.get().addLangResource(L"Extraspråk", L"extra.lng");
@@ -415,7 +407,7 @@ int APIENTRY WinMain(HINSTANCE hInstance,
       defSize = 3;
   }
   gdi_main->setFont(gEvent->getPropertyInt("TextSize", defSize),
-                    gEvent->getPropertyString("TextFont", L"Arial"));
+                    gEvent->getPropertyString("UIFont", L"Segoe UI"));
 
   if (hSplash != nullptr) {
     DWORD startupToc = GetTickCount64() - splashStart;
@@ -918,7 +910,7 @@ gdioutput *createExtraWindow(const string &tag, const wstring &title, int max_x,
     if (max_y > 0)
       ys = min(max_y, ys);
   }
-  
+
   hWnd = CreateWindowEx(0, szWorkSpaceClass, title.c_str(),
     WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN|WS_CLIPSIBLINGS,
     xp, yp, max(xs, 200), max(ys, 100), 0, NULL, hInst, NULL);
@@ -930,7 +922,7 @@ gdioutput *createExtraWindow(const string &tag, const wstring &title, int max_x,
   UpdateWindow(hWnd);
   gdioutput *gdi = new gdioutput(tag, 1.0);
   gdi->setFont(gEvent->getPropertyInt("TextSize", 0),
-               gEvent->getPropertyString("TextFont", L"Arial"));
+               gEvent->getPropertyString("UIFont", L"Segoe UI"));
 
   gdi->init(hWnd, hWnd, 0);
   gdi->isTestMode = gdi_main->isTestMode;
@@ -1972,7 +1964,7 @@ INT_PTR CALLBACK splashDialogProc(
     image.loadImage(IDI_SPLASHIMAGE, Image::ImageMethod::MonoAlpha);
     int h = image.getHeight(IDI_SPLASHIMAGE);
     int w = image.getWidth(IDI_SPLASHIMAGE);
-    image.drawImage(IDI_SPLASHIMAGE, Image::ImageMethod::MonoAlpha, hdc, (rt.right - w) / 2, (rt.bottom - h) / 2, w, h);
+    image.drawImage(IDI_SPLASHIMAGE, Image::ImageMethod::MonoAlpha, hdc, (rt.right - w) / 2, (rt.bottom - h) / 2, w, h, 0,0,0,0);
     EndPaint(hwndDlg, &ps);
     break;
   }

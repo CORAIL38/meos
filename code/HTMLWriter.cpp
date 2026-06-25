@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -64,7 +64,7 @@ static void generateStyles(const gdioutput &gdi, std::ostream &fout, double scal
   if (gdi.hasBGColor())
     fout << "body {background-color: #" << getColor(gdi.getBGColor()) << "}\n";
   else
-    fout << "body {background-coloro: rgb(250,250,255)}\n";
+    fout << "body {background-color: rgb(250,250,255)}\n";
 
   string tcolor;
   if (gdi.hasFGColor())
@@ -255,6 +255,20 @@ void HTMLWriter::formatTL(ostream &fout,
   }
 }
 
+namespace {
+  bool sortTL_X(const TextInfo *a, const TextInfo *b) {
+    return a->xp < b->xp;
+  }
+
+  wstring html_table_code(const wstring &in) {
+    if (in.size() == 0)
+      return L"&nbsp;";
+    else {
+      return encodeXML(in);
+    }
+  }
+}
+
 static void getStyle(const map< pair<gdiFonts, wstring>, pair<string, string>> &styles,
                      const TextInfo &ti, const string &extraStyle, string &starttag, string &endtag) {
   starttag.clear();
@@ -351,6 +365,214 @@ static void getStyle(const map< pair<gdiFonts, wstring>, pair<string, string>> &
   }
 }
 
+template<typename T, typename TI>
+void HTMLWriter::formatTable(std::ostream &fout,
+                             ImageWriter &imgWriter,
+                             const map<pair<gdiFonts, wstring>, pair<string, string>> &styles,
+                             const T &tl,
+                             bool simpleFormat,
+                             int marginPercent,
+                             double scale) {
+  map<int, int> tableCoordinates;
+  auto cit = tl.begin();
+  //Get x-coordinates
+  int maxX = 0;
+  while (cit != tl.end()) {
+    const TextInfo &ti = TI::ti(*cit);
+    tableCoordinates[ti.xp] = 0;
+    maxX = std::max(maxX, ti.xp + ti.getWidth());
+    ++cit;
+  }
+
+  int kr = 0;
+  map<int, int>::iterator mit = tableCoordinates.begin();
+  while (mit != tableCoordinates.end()) {
+    mit->second = kr++;
+    ++mit;
+  }
+  tableCoordinates[maxX] = kr;
+
+  vector<bool> sizeSet(kr + 1, false);
+
+  string tstyle;
+
+  if (marginPercent > 0)
+    tstyle = " style=\"margin-left: " + itos(marginPercent) + "%\"";
+
+  fout << "<table cellspacing=\"0\" border=\"0\"" << tstyle << ">\n";
+
+  int linecounter = 0;
+  cit = tl.begin();
+
+  vector< pair<int, vector<const TextInfo *> > > rows;
+  rows.reserve(tl.size() / 3);
+  vector<int> ypRow;
+  int minHeight = 100000;
+
+  while (cit != tl.end()) {
+    int y = TI::y(*cit);
+    vector<const TextInfo *> row;
+
+    int subnormal = 0;
+    int normal = 0;
+    int header = 0;
+    int mainheader = 0;
+    while (cit != tl.end() && TI::y(*cit) == y) {
+      const TextInfo &it = TI::ti(*cit);
+      if (!gdioutput::skipTextRender(it.format)) {
+        row.push_back(&it);
+        switch (it.getGdiFont()) {
+        case fontLarge:
+        case boldLarge:
+        case boldHuge:
+          mainheader++;
+          break;
+        case boldText:
+        case italicMediumPlus:
+        case fontMediumPlus:
+          header++;
+          break;
+        case fontSmall:
+        case italicSmall:
+          subnormal++;
+          break;
+        default:
+          normal++;
+        }
+      }
+      ++cit;
+    }
+
+    if (row.empty())
+      continue;
+
+    bool isMainHeader = mainheader > normal;
+    bool isHeader = (header + mainheader) > normal;
+    bool isSub = subnormal > normal;
+
+    sort(row.begin(), row.end(), sortTL_X);
+    rows.resize(rows.size() + 1);
+    rows.back().first = isMainHeader ? 1 : (isHeader ? 2 : (isSub ? 3 : 0));
+    rows.back().second.swap(row);
+    int last = ypRow.size();
+    ypRow.push_back(y);
+    if (last > 0) {
+      minHeight = min(minHeight, ypRow[last] - ypRow[last - 1]);
+    }
+  }
+  int numMin = 0;
+  for (size_t gCount = 1; gCount < rows.size(); gCount++) {
+    int h = ypRow[gCount] - ypRow[gCount - 1];
+    if (h == minHeight)
+      numMin++;
+  }
+  if (numMin == 0)
+    numMin = 1;
+
+  int hdrLimit = (rows.size() / numMin) <= 4 ? int(minHeight * 1.2) : int(minHeight * 1.5);
+  for (size_t gCount = 1; gCount + 1 < rows.size(); gCount++) {
+    int type = rows[gCount].first;
+    int lastType = gCount > 0 ? rows[gCount - 1].first : 0;
+    int nextType = gCount + 1 < rows.size() ? rows[gCount + 1].first : 0;
+    if (type == 0 && (lastType == 1 || lastType == 2) && (nextType == 1 || nextType == 2))
+      continue; // No reclassify
+
+    int h = ypRow[gCount] - ypRow[gCount - 1];
+    if (h > hdrLimit && rows[gCount].first == 0)
+      rows[gCount].first = 2;
+  }
+
+  ypRow.clear();
+  string lineclass;
+  for (size_t gCount = 0; gCount < rows.size(); gCount++) {
+    vector<const TextInfo *> &row = rows[gCount].second;
+    int type = rows[gCount].first;
+    int lastType = gCount > 0 ? rows[gCount - 1].first : 0;
+    int nextType = gCount + 1 < rows.size() ? rows[gCount + 1].first : 0;
+
+    vector<const TextInfo *>::iterator rit;
+    fout << "<tr>" << endl;
+
+    if (simpleFormat) {
+    }
+    else if (type == 1) {
+      lineclass = " class=\"freeheader\"";
+      linecounter = 0;
+    }
+    else if (type == 2) {
+      linecounter = 0;
+      lineclass = " style=\"vertical-align: bottom\" class=\"header\"";
+    }
+    else {
+      if (type == 3)
+        linecounter = 1;
+
+      if ((lastType == 1 || lastType == 2) && (nextType == 1 || nextType == 2) && row.size() < 3) {
+        lineclass = "";
+      }
+      else
+        lineclass = (linecounter & 1) ? " class=\"e1\"" : " class=\"e0\"";
+
+      linecounter++;
+    }
+
+    for (size_t k = 0; k < row.size(); k++) {
+      int thisCol = tableCoordinates[row[k]->xp];
+
+      if (k == 0 && thisCol != 0)
+        fout << "<td" << lineclass << " colspan=\"" << thisCol << "\">&nbsp;</td>";
+
+      int nextCol;
+      if (row.size() == k + 1)
+        nextCol = tableCoordinates.rbegin()->second;
+      else
+        nextCol = tableCoordinates[row[k + 1]->xp];
+
+      int colspan = nextCol - thisCol;
+
+      assert(colspan > 0);
+
+      string style;
+
+      if (row[k]->format & textRight)
+        style = " style=\"text-align:right\"";
+
+      if (colspan == 1 && !sizeSet[thisCol]) {
+        int width = int((k + 1 < row.size()) ? (row[k + 1]->xp - row[k]->xp) : (maxX - row[k]->xp));
+        int promille = (1000 * width) / maxX;
+        string prc = itos(promille / 10);
+        if (promille % 10 != 0)
+          prc += "." + itos(promille % 10);
+        fout << "  <td" << lineclass << style << " width=\"" << prc << "%\">";
+        sizeSet[thisCol] = true;
+      }
+      else if (colspan > 1)
+        fout << "  <td" << lineclass << style << " colspan=\"" << colspan << "\">";
+      else
+        fout << "  <td" << lineclass << style << ">";
+
+      if ((row[k]->format & 0xFF) == textImage) {
+        int imgW = int((row[k]->textRect.right - row[k]->textRect.left) * scale);
+        int imgH = int((row[k]->textRect.bottom - row[k]->textRect.top) * scale);
+        imgWriter.write(fout, "", "", row[k]->text, imgW, imgH);
+        fout << "</td>" << endl;
+      }
+      else {
+        gdiFonts font = row[k]->getGdiFont();
+        string starttag, endtag;
+        getStyle(styles, *row[k], "", starttag, endtag);
+
+        fout << starttag << gdioutput::toUTF8(html_table_code(row[k]->text)) << endtag << "</td>" << endl;
+      }
+    }
+    fout << "</tr>\n";
+
+    row.clear();
+  }
+
+  fout << "</table>\n";
+}
+
 void HTMLWriter::writeHTML(gdioutput &gdi, const wstring &file, 
                            const wstring &title, int refreshTimeOut, double scale){
   checkWriteAccess(file);
@@ -397,7 +619,7 @@ void HTMLWriter::writeHTML(gdioutput& gdi, ostream& fout,
   double yscale = 1.3 * scale;
   double xscale = 1.2 * scale;
   int offsetY = 0, offsetX = 0;
-  HTMLWriter::formatTL<list<TextInfo>, InterpTextInfo>(fout, imgWriter, styles, gdi.getTL(), yscale, xscale, offsetY, offsetX);
+  formatTL<list<TextInfo>, InterpTextInfo>(fout, imgWriter, styles, gdi.getTL(), yscale, xscale, offsetY, offsetX);
 
   fout << "<p style=\"position:absolute;left:10px;top:" << int(yscale * (gdi.getPageY() - 45)) + offsetY << "px\">";
 
@@ -412,21 +634,6 @@ void HTMLWriter::writeHTML(gdioutput& gdi, ostream& fout,
   fout << "</body>\n";
   fout << "</html>\n";
 }
-
-wstring html_table_code(const wstring &in)
-{
-  if (in.size()==0)
-    return L"&nbsp;";
-  else {
-    return encodeXML(in);
-  }
-}
-
-bool sortTL_X(const TextInfo *a, const TextInfo *b)
-{
-  return a->xp < b->xp;
-}
-
 
 void HTMLWriter::writeTableHTML(gdioutput &gdi, 
                                 const wstring &file,
@@ -477,193 +684,9 @@ void HTMLWriter::writeTableHTML(gdioutput& gdi,
   fout << "<body>\n";
   auto& TL = gdi.getTL();
   auto it = TL.begin();
-  int MaxX = gdi.getPageX() - 100;
-  map<int, int> tableCoordinates;
-
-  //Get x-coordinates
-  while (it != TL.end()) {
-    tableCoordinates[it->xp] = 0;
-    ++it;
-  }
-
-  int kr = 0;
-  map<int, int>::iterator mit = tableCoordinates.begin();
-  while (mit != tableCoordinates.end()) {
-    mit->second = kr++;
-    ++mit;
-  }
-  tableCoordinates[MaxX] = kr;
-
-  vector<bool> sizeSet(kr + 1, false);
-
-  fout << "<table cellspacing=\"0\" border=\"0\">\n";
-
-  int linecounter = 0;
-  it = TL.begin();
-
-  vector< pair<int, vector<const TextInfo*> > > rows;
-  rows.reserve(TL.size() / 3);
-  vector<int> ypRow;
-  int minHeight = 100000;
-
-  while (it != TL.end()) {
-    int y = it->yp;
-    vector<const TextInfo*> row;
-
-    int subnormal = 0;
-    int normal = 0;
-    int header = 0;
-    int mainheader = 0;
-    while (it != TL.end() && it->yp == y) {
-      if (!gdioutput::skipTextRender(it->format)) {
-        row.push_back(&*it);
-        switch (it->getGdiFont()) {
-        case fontLarge:
-        case boldLarge:
-        case boldHuge:
-          mainheader++;
-          break;
-        case boldText:
-        case italicMediumPlus:
-        case fontMediumPlus:
-          header++;
-          break;
-        case fontSmall:
-        case italicSmall:
-          subnormal++;
-          break;
-        default:
-          normal++;
-        }
-      }
-      ++it;
-    }
-
-    if (row.empty())
-      continue;
-
-    bool isMainHeader = mainheader > normal;
-    bool isHeader = (header + mainheader) > normal;
-    bool isSub = subnormal > normal;
-
-    sort(row.begin(), row.end(), sortTL_X);
-    rows.resize(rows.size() + 1);
-    rows.back().first = isMainHeader ? 1 : (isHeader ? 2 : (isSub ? 3 : 0));
-    rows.back().second.swap(row);
-    int last = ypRow.size();
-    ypRow.push_back(y);
-    if (last > 0) {
-      minHeight = min(minHeight, ypRow[last] - ypRow[last - 1]);
-    }
-  }
-  int numMin = 0;
-  for (size_t gCount = 1; gCount < rows.size(); gCount++) {
-    int h = ypRow[gCount] - ypRow[gCount - 1];
-    if (h == minHeight)
-      numMin++;
-  }
-  if (numMin == 0)
-    numMin = 1;
-
-  int hdrLimit = (rows.size() / numMin) <= 4 ? int(minHeight * 1.2) : int(minHeight * 1.5);
-  for (size_t gCount = 1; gCount + 1 < rows.size(); gCount++) {
-    int type = rows[gCount].first;
-    int lastType = gCount > 0 ? rows[gCount - 1].first : 0;
-    int nextType = gCount + 1 < rows.size() ? rows[gCount + 1].first : 0;
-    if (type == 0 && (lastType == 1 || lastType == 2) && (nextType == 1 || nextType == 2))
-      continue; // No reclassify
-
-    int h = ypRow[gCount] - ypRow[gCount - 1];
-    if (h > hdrLimit && rows[gCount].first == 0)
-      rows[gCount].first = 2;
-  }
-
-  ypRow.clear();
-  string lineclass;
-  for (size_t gCount = 0; gCount < rows.size(); gCount++) {
-    vector<const TextInfo*>& row = rows[gCount].second;
-    int type = rows[gCount].first;
-    int lastType = gCount > 0 ? rows[gCount - 1].first : 0;
-    int nextType = gCount + 1 < rows.size() ? rows[gCount + 1].first : 0;
-
-    vector<const TextInfo*>::iterator rit;
-    fout << "<tr>" << endl;
-
-    if (simpleFormat) {
-    }
-    else if (type == 1) {
-      lineclass = " class=\"freeheader\"";
-      linecounter = 0;
-    }
-    else if (type == 2) {
-      linecounter = 0;
-      lineclass = " valign=\"bottom\" class=\"header\"";
-    }
-    else {
-      if (type == 3)
-        linecounter = 1;
-
-      if ((lastType == 1 || lastType == 2) && (nextType == 1 || nextType == 2) && row.size() < 3) {
-        lineclass = "";
-      }
-      else
-        lineclass = (linecounter & 1) ? " class=\"e1\"" : " class=\"e0\"";
-
-      linecounter++;
-    }
-
-    for (size_t k = 0; k < row.size(); k++) {
-      int thisCol = tableCoordinates[row[k]->xp];
-
-      if (k == 0 && thisCol != 0)
-        fout << "<td" << lineclass << " colspan=\"" << thisCol << "\">&nbsp;</td>";
-
-      int nextCol;
-      if (row.size() == k + 1)
-        nextCol = tableCoordinates.rbegin()->second;
-      else
-        nextCol = tableCoordinates[row[k + 1]->xp];
-
-      int colspan = nextCol - thisCol;
-
-      assert(colspan > 0);
-
-      string style;
-
-      if (row[k]->format & textRight)
-        style = " style=\"text-align:right\"";
-
-      if (colspan == 1 && !sizeSet[thisCol]) {
-        fout << "  <td" << lineclass << style << " width=\"" << int((k + 1 < row.size()) ?
-          (row[k + 1]->xp - row[k]->xp) : (MaxX - row[k]->xp)) << "\">";
-        sizeSet[thisCol] = true;
-      }
-      else if (colspan > 1)
-        fout << "  <td" << lineclass << style << " colspan=\"" << colspan << "\">";
-      else
-        fout << "  <td" << lineclass << style << ">";
-
-      if ((row[k]->format & 0xFF) == textImage) {
-        int imgW = int((row[k]->textRect.right - row[k]->textRect.left) * scale);
-        int imgH = int((row[k]->textRect.bottom - row[k]->textRect.top) * scale);
-        imgWriter.write(fout, "", "", row[k]->text, imgW, imgH);
-        fout << "</td>" << endl;
-      }
-      else {
-        gdiFonts font = row[k]->getGdiFont();
-        string starttag, endtag;
-        getStyle(styles, *row[k], "", starttag, endtag);
-
-        fout << starttag << gdioutput::toUTF8(html_table_code(row[k]->text)) << endtag << "</td>" << endl;
-      }
-    }
-    fout << "</tr>\n";
-
-    row.clear();
-  }
-
-  fout << "</table>\n";
-
+  
+  formatTable<list<TextInfo>, InterpTextInfo>(fout, imgWriter, styles, TL, simpleFormat, 0, scale);
+  
   if (!simpleFormat) {
     fout << "<br><p>";
     char bf1[256];
@@ -957,6 +980,8 @@ void HTMLWriter::read(const wstring &fileName) {
       acc = &separator, skipLine = true;
     else if (trimLine == "@END")
       acc = &end, skipLine = true;
+    else if (trimLine == "@USETABLE")
+      useTables = true, skipLine = true;
     else if (trimLine.length() > 1 && trimLine[0] == '@') {
       string arg;
       auto res = parseFunc(str.substr(1), arg);
@@ -1045,7 +1070,6 @@ void HTMLWriter::generate(gdioutput &gdi,
   int w, h;
   gdi.getTargetDimension(w, h);
 
-
   ImageWriter imgWriter(L"", false);
   
   string meos = "<a href=\"https://www.melin.nu/meos\" target=\"_blank\"><i>MeOS</i></a>: "  + gdioutput::toUTF8(getMeosCompectVersion());
@@ -1117,12 +1141,12 @@ void HTMLWriter::generate(gdioutput &gdi,
 
   replaceAll(output, { "@D", "@DESCRIPTION"}, gdioutput::toUTF8(encodeXML(contentDescription)));
   replaceAll(output, { "@T", "@TITLE"}, gdioutput::toUTF8(encodeXML(title)));
-  replaceAll(output, { "@M", "@MEOSVERSION"}, meos);
+  replaceAll(output, { "@M", "@MEOSVERSION", "@MEOS"}, meos);
   map<pair<gdiFonts, wstring>, pair<string, string>> styles;
 
   {
     stringstream sout;
-    generateStyles(gdi, sout, scale, false, gdi.getTL(), styles);
+    generateStyles(gdi, sout, scale, useTables, gdi.getTL(), styles);
     replaceAll(output, { "@S", "@STYLE"}, sout.str());
   }
 
@@ -1156,12 +1180,15 @@ void HTMLWriter::generate(gdioutput &gdi,
       double xscale = 1.2 * scale;
       int offsetY = 0, offsetX = 0;
 
-      formatTL<vector<PrintTextInfo>, InterpPrintTextInfo>(sout, imgWriter, styles, p.text, yscale, xscale, offsetY, offsetX);
-
+      if (!useTables)
+        formatTL<vector<PrintTextInfo>, InterpPrintTextInfo>(sout, imgWriter, styles, p.text, yscale, xscale, offsetY, offsetX);
+      else
+        formatTable<vector<PrintTextInfo>, InterpPrintTextInfo>(sout, imgWriter, styles, p.text, false, marginPercent, xscale);
+      
       output = innerpage;
       replaceAll(output, { "@P", "@PAGE" }, itos(ipCounter++));
       replaceAll(output, { "@L", "@PERCENTCOMPLETE" }, itos((ip * 100) / numCol));
-      replaceAll(output, { "@M", "@MEOSVERSION" }, meos);
+      replaceAll(output, { "@M", "@MEOSVERSION", "@MEOS"}, meos);
       replaceAll(output, { "@C", "@CONTENTS" }, sout.str(), true);
 
       innerpageoutput += output;
@@ -1170,7 +1197,7 @@ void HTMLWriter::generate(gdioutput &gdi,
     string outeroutput = outerpage;
     replaceAll(outeroutput, { "@L", "@PERCENTCOMPLETE" }, itos((opCounter * 100) / nPage));
     replaceAll(outeroutput, { "@P", "@PAGE" }, itos(opCounter++));
-    replaceAll(outeroutput, { "@M", "@MEOSVERSION" }, meos);
+    replaceAll(outeroutput, { "@M", "@MEOSVERSION", "@MEOS"}, meos);
     replaceAll(outeroutput, { "@N", "@NUMPAGE" }, itos(nPage));
     replaceAll(outeroutput, { "@C", "@CONTENTS" }, innerpageoutput, true);
 
@@ -1186,7 +1213,7 @@ void HTMLWriter::generate(gdioutput &gdi,
   replaceAll(output, { "@N", "@NUMPAGE" }, itos(opCounter - 1));
   replaceAll(output, { "@I", "@NUMCOL"}, itos(numCol));
   replaceAll(output, { "@T", "@TIME" }, itos(interval));
-  replaceAll(output, { "@M", "@MEOSVERSION" }, meos);
+  replaceAll(output, { "@M", "@MEOSVERSION", "@MEOS"}, meos);
   fout << output;
 }
 

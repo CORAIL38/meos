@@ -25,21 +25,6 @@ public:
     return make_pair(0, false);
   }
 
-  class RaceIdFormatter : public oDataDefiner {
-  public:
-    const wstring& formatData(const oBase* obj, int index) const override;
-    pair<int, bool> setData(oBase* obj, int index, const wstring& input, wstring& output, int inputId) const override;
-    TableColSpec addTableColumn(Table* table, const string& description, int minWidth) const override;
-  };
-
-  class RunnerReference : public oDataDefiner {
-  public:
-    const wstring& formatData(const oBase* obj, int index) const override;
-    pair<int, bool> setData(oBase* obj, int index, const wstring& input, wstring& output, int inputId) const override;
-    void fillInput(const oBase* obj, int index, vector<pair<wstring, size_t>>& out, size_t& selected) const override;
-    TableColSpec addTableColumn(Table* table, const string& description, int minWidth) const override;
-    CellType getCellType(int index) const override;
-  };
   TableColSpec addTableColumn(Table* table, const string& description, int minWidth) const override {
     return table->addColumn(description, max(minWidth, 90), false, true);
   }
@@ -77,6 +62,26 @@ public:
   }
   TableColSpec addTableColumn(Table* table, const string& description, int minWidth) const override {
     return table->addColumn(description, max(minWidth, 90), false, true);
+  }
+};
+
+class ScoreFormatter : public oDataDefiner {
+  string attrib;
+public:
+  ScoreFormatter(const string& attrib) : attrib(attrib) {}
+
+  const wstring& formatData(const oBase* obj, int index) const override {
+    int v = obj->getDCI().getInt(attrib);
+    return obj->getEvent()->formatScore(v);
+  }
+  pair<int, bool> setData(oBase* obj, int index, const wstring& input, wstring& output, int inputId) const override {
+    int v = obj->getEvent()->convertScore(input); 
+    obj->getDI().setInt(attrib.c_str(), v);
+    output = formatData(obj, index);
+    return make_pair(0, false);
+  }
+  TableColSpec addTableColumn(Table* table, const string& description, int minWidth) const override {
+    return table->addColumn(description, max(minWidth, 90), true, true);
   }
 };
 
@@ -436,7 +441,7 @@ class PaymentChangedNf : public oDataNotifier {
       bool wasOK = oldValue >= r->getEntryFee();
       if (!wasOK && r->getStatus() == StatusDQ)
         r->setStatus(RunnerStatus::StatusUnknown, true, oBase::ChangeType::Update, false);
-      vector<int> mp;
+      vector<pair<int, pControl>> mp;
       r->evaluateCard(true, mp, 0, oBase::ChangeType::Update);
     }
   }
@@ -449,7 +454,7 @@ class FeeChangedNf : public oDataNotifier {
       bool wasOK = r->getDCI().getInt("Paid") >= oldValue;
       if (!wasOK && r->getStatus() == StatusDQ)
         r->setStatus(RunnerStatus::StatusUnknown, true, oBase::ChangeType::Update, false);
-      vector<int> mp;
+      vector<pair<int, pControl>> mp;
       r->evaluateCard(true, mp, 0, oBase::ChangeType::Update);
     }
   }
@@ -536,6 +541,14 @@ public:
 
   bool canEdit(int index) const final { 
     return fieldOrder[index].second; 
+  }
+};
+
+
+class IgnoredStartPunchNf : public oDataNotifier {
+  void notify(oBase* ob, int oldValue, int newValue) final {
+    oClass* c = (oClass*)ob;
+    c->updatedIgnoreStartPunch();
   }
 };
 

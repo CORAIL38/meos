@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -147,6 +147,13 @@ const wstring &Localizer::LocalizerInternal::tl(const wstring &str) const {
   return *ret;
 }
 
+bool Localizer::LocalizerInternal::has(const string &str) const {
+  wstring strw(str.begin(), str.end());
+  bool found;
+  impl->translate(strw, found);
+  return found;
+}
+
 const wstring &LocalizerImpl::translate(const wstring &str, bool &found) {
   found = false;
   static int i = 0;
@@ -163,12 +170,16 @@ const wstring &LocalizerImpl::translate(const wstring &str, bool &found) {
     found = true;
     return value[i];
   }
-  
+  auto isDigit = [](wchar_t c) {
+    return c >= '0' && c <= '9';
+  };
+
   if (str[0]==',' || str[0]==' ' || str[0]=='.'
-       || str[0]==':'  || str[0]==';' || str[0]=='<' || str[0]=='>' || str[0]=='-' || str[0]==0x96) {
+       || str[0]==':'  || str[0]==';' || str[0]=='<' || str[0]=='>' 
+       || str[0]=='-' || str[0]==0x96 || str[0]=='×' || isDigit(str[0])) {
     unsigned k=1;
     while(str[k] && (str[k]==' ' || str[k]=='.' || str[k]==':' || str[k]=='<' || str[k]=='>'
-           || str[k]=='-' || str[k]==0x96))
+           || str[k]=='-' || str[k]==0x96 || str[k] == '×' || isDigit(str[k])))
       k++;
 
     if (k<str.length()) {
@@ -224,14 +235,11 @@ const wstring &LocalizerImpl::translate(const wstring &str, bool &found) {
     return value[i];
   }
 
-  auto isDigit = [](wchar_t c) {
-    return c >= '0' && c <= '9';
-  };
-
-
+  
   wchar_t last = str[len-1];
   if (last != ':' && last != '.' && last != ' ' && last != ',' &&
-      last != ';' && last != '<' && last != '>' && last != '-' && last != 0x96 && !isDigit(last)) {
+      last != ';' && last != '<' && last != '>' && last != '-' &&
+      last != 0x96 && last != 215 && !isDigit(last)) {
 #ifdef _DEBUG
     if (str.length()>1)
       addUnknown(str);
@@ -248,7 +256,7 @@ const wstring &LocalizerImpl::translate(const wstring &str, bool &found) {
   while(pos>0) {
     wchar_t last = str[pos];
     if (last != ':' && last != ' ' && last != ',' && last != '.' &&
-        last != ';' && last != '<' && last != '>' && last != '-' && last != 0x96 && !isDigit(last))
+        last != ';' && last != '<' && last != '>' && last != '-' && last != 0x96 && last != 215 && !isDigit(last))
       break;
 
     pos = str.find_last_not_of(last, pos);
@@ -569,4 +577,8 @@ const wstring Localizer::tl(const wstring &str, bool cap) const {
     ::capitalizeWords(w);
 
   return w;
+}
+
+bool Localizer::has(const string &str) const {
+  return linternal->has(str);
 }

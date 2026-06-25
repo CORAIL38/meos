@@ -1,6 +1,6 @@
 /************************************************************************
 MeOS - Orienteering Software
-Copyright (C) 2009-2025 Melin Software HB
+Copyright (C) 2009-2026 Melin Software HB
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -636,8 +636,9 @@ wstring oEvent::cloneCompetition(bool cloneRunners, bool cloneTimes,
     for (oCourseList::iterator it = Courses.begin(); it != Courses.end(); ++it) {
       if (it->isRemoved())
         continue;
-      pCourse pc = ce.addCourse(it->Name, it->Length, it->Id);
+      pCourse pc = ce.addCourse(it->name, it->length, it->Id);
       pc->importControls(it->getControls(), false, false);
+      pc->setStartFinishId(it->getStartId(), it->getFinishId());
       pc->legLengths = it->legLengths;
       memcpy(pc->oData, it->oData, sizeof(pc->oData));
     }
@@ -1176,7 +1177,7 @@ void oEvent::transferResult(oEvent &ce,
                                      0, src->getBirthDate(), true);
           dst->cloneData(src);
           dst->setInputData(*src);
-          dst->setStatus(StatusNotCompetiting, true, ChangeType::Update);
+          dst->setStatus(StatusNotCompeting, true, ChangeType::Update);
           notTransfered.push_back(dst);
         }
         else
@@ -1191,7 +1192,7 @@ void oEvent::transferResult(oEvent &ce,
       noAssignmentTarget.push_back(targetRunners[k]);
       if (targetRunners[k]->inputStatus == StatusUnknown ||
         (targetRunners[k]->inputStatus == StatusOK && targetRunners[k]->inputTime == 0)) {
-        targetRunners[k]->inputStatus = StatusNotCompetiting;
+        targetRunners[k]->inputStatus = StatusNotCompeting;
       }
     }
   }
@@ -1501,14 +1502,14 @@ void oCourse::merge(const oBase &input, const oBase *baseIn) {
   const oCourse &src = dynamic_cast<const oCourse&>(input);
   const oCourse *base = dynamic_cast<const oCourse*>(baseIn);
 
-  if ((base == nullptr || base->Name != src.Name) && (src.Name.length() > 0))
-    setName(src.Name);
-  if (!base || base->Length != src.Length)
-    setLength(src.Length);
+  if ((base == nullptr || base->name != src.name) && (src.name.length() > 0))
+    setName(src.name);
+  if (!base || base->length != src.length)
+    setLength(src.length);
 
   importControls(src.getControls(), true, false);
   importLegLengths(src.getLegLengths(), true);
-
+  setStartFinishId(src.getStartId(), src.getFinishId());
   if (getDI().merge(input, base))
     updateChanged();
 
@@ -1637,7 +1638,7 @@ void oEvent::addMergeInfo(const wstring &tag, const wstring &version) {
     mvv.push_back(tag);
     mvv.push_back(version);
   }
-  unsplit(mvv, L":", mv);
+  unsplit<wstring>(mvv, L":", mv);
   getDI().setString("MergeInfo", mv);
 }
 

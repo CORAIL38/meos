@@ -1,6 +1,6 @@
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -47,6 +47,11 @@ CellWrapper::operator int() const {
   if (data != nullptr)
     return atoi(data);
   return 0;
+}
+CellWrapper::operator double() const {
+  if (data != nullptr)
+    return atof(data);
+  return 0.0;
 }
 CellWrapper::operator unsigned int() const {
   char *out;

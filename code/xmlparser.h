@@ -2,15 +2,10 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#if !defined(AFX_XMLPARSER_H__87834E6D_6AB1_471C_8E1C_E65D67A4F98A__INCLUDED_)
-#define AFX_XMLPARSER_H__87834E6D_6AB1_471C_8E1C_E65D67A4F98A__INCLUDED_
-
-#if _MSC_VER > 1000
 #pragma once
-#endif // _MSC_VER > 1000
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -49,15 +44,26 @@ struct xmldata
   int next;
 };
 
-struct xmlattrib
-{
-
+struct xmlattrib {
   xmlattrib(const char *t, char *d, const xmlparser *parser);
   const char *tag;
   char *data;
   operator bool() const { return data != nullptr; }
 
   int getInt() const {if (data) return atoi(data); else return 0;}
+
+  int64_t getInt64() const {
+    return data ? _atoi64(data) : 0;
+  }
+
+  uint64_t getInt64u() const {
+    return data ? strtoull(data, nullptr, 10) : 0;
+  }
+
+  double getDouble() const {
+    return data ? strtod(data, nullptr) : 0.0;
+  }
+
   const char *getPtr() const;
   const wchar_t *getWPtr() const;
 
@@ -88,9 +94,9 @@ protected:
   static const char *ltrim(const char *s);
 
   string tagStack[32];
-  int tagStackPointer;
+  int tagStackPointer = 0;
 
-  bool toString;
+  bool toString = false;
   std::ofstream foutFile;
   std::ostringstream foutString;
 
@@ -103,7 +109,7 @@ protected:
       return foutFile;
   }
 
-  int lineNumber;
+  int lineNumber = 0;
   string doctype;
 
   vector<int> parseStack;
@@ -132,6 +138,8 @@ protected:
 
   mutable wstring encodeString;
 public:
+  bool hasOpenOut() const { return tagStackPointer > 0; }
+
   void access(int index);
 
   void setProgress(HWND hWnd);
@@ -158,18 +166,11 @@ public:
   void write(const char *tag, const char *prop,
              const wstring &propValue, const wstring &value);
 
-  //void write(const char *tag, const char *prop,
-  //           bool propValue, const string &value);
   void writeBool(const char *tag, const char *prop,
                  bool propValue, const wstring &value);
 
-  //void write(const char *tag, const char *prop,
-  //           const char *propValue, const string &value);
   void write(const char *tag, const char *prop,
              const wchar_t *propValue, const wstring &value);
-
-  //void write(const char *tag, const vector< pair<string, string> > &propValue, const string &value);
-  //void write(const char *tag, const vector< pair<string, string> > &propValue, const wstring &value);
   void write(const char *tag, const vector< pair<string, wstring> > &propValue, const wstring &value);
 
   void write(const char *tag, const string &value);
@@ -177,16 +178,21 @@ public:
 
   void write(const char *tag, const wstring &value);
   
+  void write(const char *tag, double value);
   void write(const char *tag, int value);
+  void write(const char* tag, size_t value) {
+    write(tag, int(value));
+  }
+  
   void writeTime(const char *tag, int relativeTime);
 
   void writeBool(const char *tag, bool value);
-  void write64(const char *tag, __int64);
+  void write64(const char *tag, int64_t);
+  void write64u(const char* tag, uint64_t);
 
   void startTag(const char *tag);
   void startTag(const char *tag, const char *Property,
                 const string &Value);
-  //void startTag(const char *tag, const vector<string> &propvalue);
 
   void startTag(const char *tag, const char *Property,
                 const wstring &Value);
@@ -208,6 +214,10 @@ public:
   xmlparser();
   virtual ~xmlparser();
 
+  bool skipDefault() const {
+    return cutMode;
+  }
+
   friend class xmlobject;
   friend struct xmlattrib;
 };
@@ -225,8 +235,7 @@ public:
   xmlobject getObject(const char *pname) const;
   xmlattrib getAttrib(const char *pname) const;
 
-  int getObjectInt(const char *pname) const
-  {
+  int getObjectInt(const char *pname) const {
     xmlobject x(getObject(pname));
     if (x)
       return x.getInt();
@@ -237,6 +246,10 @@ public:
     }
     return 0;
   }
+
+  int64_t getObjectInt64(const char* pname) const;
+  uint64_t getObjectInt64u(const char* pname) const;
+  double getObjectDouble(const char* pname) const;
 
   bool got(const char *pname) const {
     xmlobject x(getObject(pname));
@@ -298,8 +311,20 @@ public:
 
   int getRelativeTime() const;
 
-  __int64 getInt64() const {const char *d = parser->xmlinfo[index].data;
-                           return d ? _atoi64(d) : 0;}
+  int64_t getInt64() const {
+    const char* d = parser->xmlinfo[index].data;
+    return d ? _atoi64(d) : 0;
+  }
+
+  uint64_t getInt64u() const {
+    const char* d = parser->xmlinfo[index].data;
+    return d ? strtoull(d, nullptr, 10) : 0;
+  }
+
+  double getDouble() const {
+    const char* d = parser->xmlinfo[index].data;
+    return d ? strtod(d, nullptr) : 0.0;
+  }
 
   bool isnull() const {return parser==0;}
 
@@ -309,6 +334,3 @@ public:
   virtual ~xmlobject();
   friend class xmlparser;
 };
-
-
-#endif // !defined(AFX_XMLPARSER_H__87834E6D_6AB1_471C_8E1C_E65D67A4F98A__INCLUDED_)

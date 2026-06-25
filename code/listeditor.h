@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -101,8 +101,8 @@ private:
   TabBase *origin = nullptr;
   void show(gdioutput &gdi);
 
-  int xpUseLeg;
-  int ypUseLeg;
+  int xpUseLeg = 0;
+  int ypUseLeg = 0;
 
   bool legStageTypeIndex(gdioutput &gdi, EPostType type, int leg);
 

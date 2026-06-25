@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,58 +36,45 @@
 #include "gdioutput.h"
 #include "Table.h"
 #include <algorithm>
-
-//////////////////////////////////////////////////////////////////////
-// Construction/Destruction
-//////////////////////////////////////////////////////////////////////
-
+#include "xmlparser.h"
 #include "intkeymapimpl.hpp"
 
-oCourse::oCourse(oEvent *poe) : oBase(poe)
-{
+oCourse::oCourse(oEvent* poe) : oBase(poe) {
   getDI().initData();
-  nControls=0;
-  Length=0;
   clearCache();
-  tMapsUsed = -1;
-  tMapsUsedNoVacant = -1;
-  Id=oe->getFreeCourseId();
+  Id = oe->getFreeCourseId();
 }
 
-oCourse::oCourse(oEvent *poe, int id) : oBase(poe)
-{
+oCourse::oCourse(oEvent* poe, int id) : oBase(poe) {
   getDI().initData();
-  nControls=0;
-  Length=0;
   clearCache();
   if (id == 0)
     id = oe->getFreeCourseId();
-  Id=id;  
-  tMapsUsed = -1;
-  tMapsUsedNoVacant = -1;
+  Id = id;
   oe->qFreeCourseId = max(id, oe->qFreeCourseId);
 }
 
-oCourse::~oCourse()
-{
+oCourse::~oCourse() = default;
+
+wstring oCourse::getInfo() const {
+  return L"Bana " + name;
 }
 
-wstring oCourse::getInfo() const
-{
-  return L"Bana " + Name;
-}
-
-bool oCourse::Write(xmlparser &xml)
-{
+bool oCourse::Write(xmlparser &xml) {
   if (Removed) return true;
   
   xml.startTag("Course");
 
   xml.write("Id", Id);
   xml.write("Updated", getStamp());
-  xml.write("Name", Name);
-  xml.write("Length", Length);
+  xml.write("Name", name);
+  xml.write("Length", length);
   xml.write("Controls", getControls());
+  if (start)
+    xml.write("Start", start->getId());
+  if (finish)
+    xml.write("Finish", finish->getId());
+
   xml.write("Legs", getLegLengths());
 
   getDI().write(xml);
@@ -96,8 +83,7 @@ bool oCourse::Write(xmlparser &xml)
   return true;
 }
 
-void oCourse::Set(const xmlobject *xo)
-{
+void oCourse::Set(const xmlobject *xo) {
   xmlList xl;
   xo->getObjects(xl);
 
@@ -108,16 +94,22 @@ void oCourse::Set(const xmlobject *xo)
       Id=it->getInt();
     }
     else if (it->is("Length")){
-      Length=it->getInt();
+      length=it->getInt();
     }
     else if (it->is("Name")){
-      Name=it->getWStr();
+      name=it->getWStr();
     }
     else if (it->is("Controls")){
       importControls(it->getRawStr(), false, false);
     }
     else if (it->is("Legs")) {
       importLegLengths(it->getRawStr(), false);
+    }
+    else if (it->is("Start")) {
+      start = oe->getControl(it->getInt());
+    }
+    else if (it->is("Finish")) {
+      finish = oe->getControl(it->getInt());
     }
     else if (it->is("oData")){
       getDI().set(*it);
@@ -128,42 +120,39 @@ void oCourse::Set(const xmlobject *xo)
   }
 }
 
-string oCourse::getLegLengths() const
-{
+string oCourse::getLegLengths() const {
   string str;
-  for(size_t m=0; m<legLengths.size(); m++){
-    if (m>0)
+  for (size_t m = 0; m < legLengths.size(); m++) {
+    if (m > 0)
       str += ";";
-    str+=itos(legLengths[m]);
+    str += itos(legLengths[m]);
   }
   return str;
 }
 
-string oCourse::getControls() const
-{
-  string str="";
+string oCourse::getControls() const {
+  string str = "";
   char bf[16];
-  for(int m=0;m<nControls;m++){
-    sprintf_s(bf, 16, "%d;", Controls[m]->Id);
-    str+=bf;
+  for (int m = 0; m < nControls(); m++) {
+    sprintf_s(bf, 16, "%d;", controls[m]->Id);
+    str += bf;
   }
 
   return str;
 }
 
-wstring oCourse::getControlsUI() const
-{
+wstring oCourse::getControlsUI() const {
   wstring str;
   wchar_t bf[16];
   int m;
 
-  for(m=0;m<nControls-1;m++){
-    swprintf_s(bf, 16, L"%d, ", Controls[m]->Id);
+  for (m = 0; m < nControls() - 1; m++) {
+    swprintf_s(bf, 16, L"%d, ", controls[m]->Id);
     str += bf;
   }
 
-  if (m<nControls){
-    swprintf_s(bf, 16, L"%d", Controls[m]->Id);
+  if (m < nControls()) {
+    swprintf_s(bf, 16, L"%d", controls[m]->Id);
     str += bf;
   }
 
@@ -182,13 +171,13 @@ vector<wstring> oCourse::getCourseReadable(int limit) const
   vector<pControl> rg;
   bool needFinish = false;
   bool rogaining = hasRogaining();
-  for (m=0; m<nControls; m++) {
-    if (Controls[m]->isRogaining(rogaining))
-      rg.push_back(Controls[m]);
+  for (m = 0; m < nControls(); m++) {
+    if (controls[m]->isRogaining(rogaining))
+      rg.push_back(controls[m]);
     else {
       if (!str.empty())
         str += L"-";
-      str += Controls[m]->getLongString();
+      str += controls[m]->getLongString();
       needFinish = true;
     }
     if (str.length() >= size_t(limit)) {
@@ -200,10 +189,10 @@ vector<wstring> oCourse::getCourseReadable(int limit) const
   if (needFinish && !useLastAsFinish()) {
     if (!str.empty())
       str += L"-";
-    str += lang.tl("Mål").substr(0,1);
+    str += lang.tl("Mål").substr(0, 1);
   }
   if (!str.empty()) {
-    if (str.length()<5 && !res.empty())
+    if (str.length() < 5 && !res.empty())
       res.back().append(str);
     else
       res.push_back(str);
@@ -212,8 +201,8 @@ vector<wstring> oCourse::getCourseReadable(int limit) const
 
   if (!rg.empty()) {
     str = lang.tl("Rogaining: ");
-    for (size_t k = 0; k<rg.size(); k++) {
-      if (k>0)
+    for (size_t k = 0; k < rg.size(); k++) {
+      if (k > 0)
         str += L", ";
 
       if (str.length() >= size_t(limit)) {
@@ -237,17 +226,12 @@ pControl oCourse::addControl(int Id)
   return pc;
 }
 
-pControl oCourse::doAddControl(int Id)
-{
-  if (nControls<NControlsMax) {
-    pControl c=oe->getControl(Id, true, false);
-    if (c==0)
-      throw meosException("Felaktig kontroll");
-    Controls[nControls++]=c;
-    return c;
-  }
-  else
-    throw meosException("För många kontroller.");
+pControl oCourse::doAddControl(int Id) {
+  pControl c = oe->getControl(Id, true, false);
+  if (c == nullptr)
+    throw meosException("Felaktig kontroll");
+  controls.push_back(c);
+  return c;
 }
 
 void oCourse::splitControls(const string &ctrls, vector<int> &nr) {
@@ -266,28 +250,27 @@ void oCourse::splitControls(const string &ctrls, vector<int> &nr) {
   }
 }
 
-bool oCourse::importControls(const string &ctrls, bool setChanged, bool updateLegLengths) {
-  int oldNC = nControls;
+bool oCourse::importControls(const string& ctrls, bool setChanged, bool updateLegLengths) {
   vector<int> oldC;
-  for (int k = 0; k<nControls; k++)
-    oldC.push_back(Controls[k] ? Controls[k]->getId() : 0);
+  for (int k = 0; k < nControls(); k++)
+    oldC.push_back(controls[k] ? controls[k]->getId() : 0);
 
-  nControls = 0;
+  controls.clear();
 
   vector<int> newC;
   splitControls(ctrls, newC);
 
-  for (size_t k = 0; k< newC.size(); k++)
+  for (size_t k = 0; k < newC.size(); k++)
     doAddControl(newC[k]);
 
-  bool changed = nControls != oldNC;
+  bool changed = nControls() != oldC.size();
 
   if (changed && updateLegLengths && legLengths.size() > 0) {
     int oldIndex = 0;
     int newIndex = 0;
-    vector<int> newLen(nControls + 1);
+    vector<int> newLen(nControls() + 1);
     bool lastOK = true;
-    while (newIndex < nControls) {
+    while (newIndex < nControls()) {
       if (oldIndex < int(oldC.size())) {
         if (oldC[oldIndex] == newC[newIndex]) {
           if (lastOK && oldIndex < int(legLengths.size())) {
@@ -299,7 +282,7 @@ bool oCourse::importControls(const string &ctrls, bool setChanged, bool updateLe
         else {
           lastOK = false;
           int forward = oldIndex + 1;
-          while(forward < int(oldC.size())) {
+          while (forward < int(oldC.size())) {
             if (oldC[forward] == newC[newIndex]) {
               oldIndex = forward + 1;
               lastOK = true;
@@ -321,8 +304,8 @@ bool oCourse::importControls(const string &ctrls, bool setChanged, bool updateLe
     swap(newLen, legLengths);
   }
 
-  for (int k = 0; !changed && k<nControls; k++)
-    changed |= oldC[k] != Controls[k]->getId();
+  for (int k = 0; !changed && k < nControls(); k++)
+    changed |= oldC[k] != controls[k]->getId();
 
   if (changed) {
     if (setChanged)
@@ -334,8 +317,7 @@ bool oCourse::importControls(const string &ctrls, bool setChanged, bool updateLe
   return changed;
 }
 
-void oCourse::importLegLengths(const string &legs, bool setChanged)
-{
+void oCourse::importLegLengths(const string& legs, bool setChanged) {
   vector<string> splits;
   split(legs, ";", splits);
 
@@ -345,22 +327,21 @@ void oCourse::importLegLengths(const string &legs, bool setChanged)
     legLengths.resize(splits.size());
     changed = true;
   }
-  for (size_t k = 0; k<legLengths.size(); k++) {
+  for (size_t k = 0; k < legLengths.size(); k++) {
     int val = atoi(splits[k].c_str());
     if (legLengths[k] != val)
       changed = true;
     legLengths[k] = val;
   }
 
-  if (changed && setChanged) 
+  if (changed && setChanged)
     updateChanged();
 }
 
-oControl *oCourse::getControl(int index) const
-{
-  if (index>=0 && index<nControls)
-    return Controls[index];
-  else return 0;
+oControl* oCourse::getControl(int index) const {
+  if (index >= 0 && index < nControls())
+    return controls[index];
+  else return nullptr;
 }
 
 int oCourse::getLegLength(int index) const {
@@ -370,9 +351,9 @@ int oCourse::getLegLength(int index) const {
   return 0;
 }
 
-bool oCourse::fillCourse(gdioutput &gdi, const string &name)
+bool oCourse::fillCourse(gdioutput& gdi, const string& name)
 {
-  int finishIx = useLastAsFinish() ? nControls - 1 : -1;
+  int finishIx = useLastAsFinish() ? nControls() - 1 : -1;
   int startIx = useFirstAsStart() ? 0 : -1;
 
   oPunchList::iterator it;
@@ -381,34 +362,34 @@ bool oCourse::fillCourse(gdioutput &gdi, const string &name)
   int offset = 1;
   if (startIx == -1)
     gdi.addItem(name, lang.tl("Start"), -1);
-  for (int k=0;k<nControls;k++) {
-    wstring c = Controls[k]->getString();
+  for (int k = 0; k < nControls(); k++) {
+    wstring c = controls[k]->getString();
     if (c.length() > 32)
-      c= c.substr(0, 32) + L"...";
+      c = c.substr(0, 32) + L"...";
     if (k == startIx)
       c += L" (" + lang.tl("Start") + L")";
     else if (k == finishIx)
       c += L" (" + lang.tl("Mål") + L")";
 
-    int multi = Controls[k]->getNumMulti();
+    int multi = controls[k]->getNumMulti();
     int submulti = 0;
     wchar_t bf[256];
-    if (Controls[k]->isRogaining(rogaining)) {
-      if (Controls[k]->getStatus() == oControl::ControlStatus::StatusRogainingRequired)
+    if (controls[k]->isRogaining(rogaining)) {
+      if (controls[k]->getStatus() == oControl::ControlStatus::StatusRogainingRequired)
         swprintf_s(bf, 64, L"R!\t%s", c.c_str());
       else
         swprintf_s(bf, 64, L"R\t%s", c.c_str());
       offset--;
     }
     else if (multi == 1) {
-      swprintf_s(bf, 64, L"%d\t%s", k+offset, c.c_str());
+      swprintf_s(bf, 64, L"%d\t%s", k + offset, c.c_str());
     }
     else
-      swprintf_s(bf, 64, L"%d%c\t%s", k+offset, 'A', c.c_str());
+      swprintf_s(bf, 64, L"%d%c\t%s", k + offset, 'A', c.c_str());
     gdi.addItem(name, bf, k);
-    while (multi>1) {
+    while (multi > 1) {
       submulti++;
-      swprintf_s(bf, 64, L"%d%c\t-:-", k+offset, 'A'+submulti);
+      swprintf_s(bf, 64, L"%d%c\t-:-", k + offset, 'A' + submulti);
       gdi.addItem(name, bf, -1);
       multi--;
     }
@@ -421,17 +402,13 @@ bool oCourse::fillCourse(gdioutput &gdi, const string &name)
 }
 
 void oCourse::getControls(vector<pControl> &pc) const {
-  pc.clear();
-  pc.reserve(nControls);
-  for(int k=0;k<nControls;k++){
-    pc.push_back(Controls[k]);
-  }
+  pc = controls;
 }
 
 vector<int> oCourse::getControlNumbers() const {
   vector<int> ret;
-  for (int k = 0; k<nControls; k++) {
-    ret.push_back(Controls[k]->getFirstNumber());
+  for (int k = 0; k<nControls(); k++) {
+    ret.push_back(controls[k]->getFirstNumber());
   }
   return ret;
 }
@@ -463,37 +440,37 @@ int oCourse::distance(const oCard& card) const {
   return distance(punches, numRealPunch);
 }
 
-int oCourse::distance(int *punches, int numPunches) const {
-  int matches=0;
+int oCourse::distance(int* punches, int numPunches) const {
+  int matches = 0;
 
   set<int> rogaining;
   vector< map<int, int> > allowedControls;
-  allowedControls.reserve(nControls);
+  allowedControls.reserve(nControls());
   set<int> commonCode;
   if (hasRogaining()) {
-    for (int k=0;k<nControls;k++) {
-      if (Controls[k]->isRogaining(true)) {
-        for (int j = 0; j < Controls[k]->nNumbers; j++)
-          rogaining.insert(Controls[k]->Numbers[j]);
+    for (int k = 0; k < nControls(); k++) {
+      if (controls[k]->isRogaining(true)) {
+        for (int j = 0; j < controls[k]->nNumbers; j++)
+          rogaining.insert(controls[k]->Numbers[j]);
       }
     }
   }
 
   int toMatch = 0;
   size_t orderIndex = 0;
-  for (int k=0;k<nControls;k++) {
-    if (Controls[k]->isRogaining(hasRogaining()) || 
-        Controls[k]->getStatus() == oControl::ControlStatus::StatusBad ||
-        Controls[k]->getStatus() == oControl::ControlStatus::StatusOptional ||
-        Controls[k]->getStatus() == oControl::ControlStatus::StatusBadNoTiming)
+  for (int k = 0; k < nControls(); k++) {
+    if (controls[k]->isRogaining(hasRogaining()) ||
+      controls[k]->getStatus() == oControl::ControlStatus::StatusBad ||
+      controls[k]->getStatus() == oControl::ControlStatus::StatusOptional ||
+      controls[k]->getStatus() == oControl::ControlStatus::StatusBadNoTiming)
       continue;
 
-    if (Controls[k]->getStatus() == oControl::ControlStatus::StatusMultiple) {
-      for (int j = 0; j < Controls[k]->nNumbers; j++) {
+    if (controls[k]->getStatus() == oControl::ControlStatus::StatusMultiple) {
+      for (int j = 0; j < controls[k]->nNumbers; j++) {
         if (allowedControls.size() <= orderIndex)
-          allowedControls.resize(orderIndex+1);
-        for (int i = 0; i < Controls[k]->nNumbers; i++) {
-          ++allowedControls[orderIndex][Controls[k]->Numbers[i]];
+          allowedControls.resize(orderIndex + 1);
+        for (int i = 0; i < controls[k]->nNumbers; i++) {
+          ++allowedControls[orderIndex][controls[k]->Numbers[i]];
         }
         orderIndex++;
         toMatch++;
@@ -501,18 +478,18 @@ int oCourse::distance(int *punches, int numPunches) const {
     }
     else {
       if (allowedControls.size() <= orderIndex)
-        allowedControls.resize(orderIndex+1);
+        allowedControls.resize(orderIndex + 1);
 
-      for (int j = 0; j < Controls[k]->nNumbers; j++) {
-        ++allowedControls[orderIndex][Controls[k]->Numbers[j]];
+      for (int j = 0; j < controls[k]->nNumbers; j++) {
+        ++allowedControls[orderIndex][controls[k]->Numbers[j]];
       }
       orderIndex++;
       toMatch++;
     }
 
-    if (getCommonControl() == Controls[k]->getId()) {
+    if (getCommonControl() == controls[k]->getId()) {
       orderIndex = 0;
-      commonCode.insert(Controls[k]->Numbers, Controls[k]->Numbers+Controls[k]->nNumbers);
+      commonCode.insert(controls[k]->Numbers, controls[k]->Numbers + controls[k]->nNumbers);
     }
   }
 
@@ -533,12 +510,12 @@ int oCourse::distance(int *punches, int numPunches) const {
       matchIndex = 0;
   }
 
-  if (matches==toMatch) {
+  if (matches == toMatch) {
     //This course is OK. Extra controls?
-    return numPunches-toMatch; //Positive return
+    return numPunches - toMatch; //Positive return
   }
   else {
-    return matches-toMatch; //Negative return;
+    return matches - toMatch; //Negative return;
   }
   return 0;
 }
@@ -548,21 +525,27 @@ wstring oCourse::getLengthS() const
   return itow(getLength());
 }
 
-void oCourse::setName(const wstring &n)
-{
-  if (Name!=n){
-    Name=n;
+void oCourse::setName(const wstring& n) {
+  if (name != n) {
+    name = n;
     updateChanged();
   }
 }
 
-void oCourse::setLength(int le)
-{
-  if (le<0 || le > 1000000)
+int oCourse::getClimb() const { 
+  return getDCI().getInt("Climb"); 
+}
+
+bool oCourse::setClimb(int climb) { 
+  return getDI().setInt("Climb", climb); 
+}
+
+void oCourse::setLength(int le) {
+  if (le < 0 || le > 1000000)
     le = 0;
 
-  if (Length!=le){
-    Length=le;
+  if (length != le) {
+    length = le;
     updateChanged();
   }
 }
@@ -602,11 +585,11 @@ pCourse oEvent::getCourse(int Id) const {
   return 0;
 }
 
-pCourse oEvent::getCourse(const wstring &n) const {
+pCourse oEvent::getCourse(const wstring& n) const {
   oCourseList::const_iterator it;
 
-  for (it=Courses.begin(); it != Courses.end(); ++it) {
-    if (it->Name==n)
+  for (it = Courses.begin(); it != Courses.end(); ++it) {
+    if (!it->isRemoved() && it->name == n)
       return pCourse(&*it);
   }
   return 0;
@@ -620,8 +603,8 @@ void oEvent::fillCourses(gdioutput &gdi, const string &id, const vector<pair<wst
   gdi.setItems(id, d);
 }
 
-const vector< pair<wstring, size_t> > &oEvent::getCourses(vector<pair<wstring, size_t>>& out,
-                                                          const wstring& filter, bool simple, bool synchronize) {
+const vector<pair<wstring, size_t>>& oEvent::getCourses(vector<pair<wstring, size_t>>& out,
+  const wstring& filter, bool simple, bool synchronize) {
   out.clear();
   oCourseList::iterator it;
   if (synchronize) {
@@ -630,9 +613,9 @@ const vector< pair<wstring, size_t> > &oEvent::getCourses(vector<pair<wstring, s
   }
 
   vector<pair<pCourse, pair<pCourse, bool>> > ac;
-  ac.reserve(Courses.size()+2);
-  map<int,int> id2ix;
-  for (it=Courses.begin(); it != Courses.end(); ++it) {
+  ac.reserve(Courses.size() + 2);
+  map<int, int> id2ix;
+  for (it = Courses.begin(); it != Courses.end(); ++it) {
     if (!it->Removed) {
       if (!simple)
         id2ix[it->getId()] = ac.size();
@@ -663,20 +646,20 @@ const vector< pair<wstring, size_t> > &oEvent::getCourses(vector<pair<wstring, s
     pCourse it = ac[k].first;
 
     if (!filter.empty()) {
-      if (!filterMatchString(it->Name, filt_lc.data(), score))
+      if (!filterMatchString(it->name, filt_lc.data(), score))
         continue;
     }
 
-    if (simple) 
-      out.emplace_back(it->Name, it->Id);
+    if (simple)
+      out.emplace_back(it->name, it->Id);
     else {
-      b = it->Name;
+      b = it->name;
       if (ac[k].second.first) {
-        b += L" < " + ac[k].second.first->Name;
+        b += L" < " + ac[k].second.first->name;
         if (ac[k].second.second)
           b += L", ...";
       }
-      b += L"\t(" + itow(it->nControls) + L")";
+      b += L"\t(" + itow(it->nControls()) + L")";
       if (!it->getCourseProblems().empty())
         b = L"[!] " + b;
       out.emplace_back(b, it->Id);
@@ -703,14 +686,30 @@ int oCourse::getNumUsedMaps(bool noVacant) const {
     return tMapsUsed;
 }
 
-void oCourse::setStart(const wstring &start, bool sync)
-{
+bool oCourse::setStartFinish(pControl startC, pControl finishC, bool updateStatus) {
+  if (startC != start || finishC != finish) {
+    start = startC;
+    finish = finishC;
+    if (updateStatus)
+      updateChanged();
+    return true;
+  }
+  return false;
+}
+
+bool oCourse::setStartFinishId(int startId, int finishId, bool updateStatus) {
+  pControl s = startId ? oe->getControl(startId, false, false) : nullptr;
+  pControl f = finishId ? oe->getControl(finishId, false, false) : nullptr;
+  return setStartFinish(s, f, updateStatus);
+}
+
+void oCourse::setStart(const wstring& start, bool sync) {
   if (getDI().setString("StartName", start)) {
     if (sync)
       synchronize();
     oClassList::iterator it;
-    for (it=oe->Classes.begin();it!=oe->Classes.end();++it) {
-      if (it->getCourse()==this) {
+    for (it = oe->Classes.begin(); it != oe->Classes.end(); ++it) {
+      if (it->getCourse() == this) {
         it->setStart(start);
         if (sync)
           it->synchronize();
@@ -719,8 +718,7 @@ void oCourse::setStart(const wstring &start, bool sync)
   }
 }
 
-wstring oCourse::getStart() const
-{
+const wstring &oCourse::getStart() const {
   return getDCI().getString("StartName");
 }
 
@@ -822,8 +820,8 @@ void oEvent::calculateNumRemainingMaps(bool forceRecalculate) {
 int oCourse::getIdSum(int nC) {
 
   int id = 0;
-  for (int k = 0; k<min(nC, nControls); k++)
-    id = 431 * id + (Controls[k] ? Controls[k]->getId() : 0);
+  for (int k = 0; k < min<int>(nC, nControls()); k++)
+    id = 431 * id + (controls[k] ? controls[k]->getId() : 0);
 
   if (id == 0)
     return getId();
@@ -832,7 +830,7 @@ int oCourse::getIdSum(int nC) {
 }
 
 void oCourse::setLegLengths(const vector<int> &legs) {
-  if (legs.size() == nControls +1 || legs.empty()) {
+  if (legs.size() == nControls() + 1 || legs.empty()) {
     bool diff = legs.size() != legLengths.size();
     if (!diff) {
       for (size_t k = 0; k<legs.size(); k++)
@@ -848,27 +846,24 @@ void oCourse::setLegLengths(const vector<int> &legs) {
     throw std::exception("Invalid parameter value");
 }
 
-double oCourse::getPartOfCourse(int start, int end) const
-{
+double oCourse::getPartOfCourse(int start, int end) const {
   if (end == 0)
-    end = nControls;
+    end = nControls();
 
-  if (legLengths.size() != nControls +1 || start <= end ||
+  if (legLengths.size() != nControls() + 1 || start <= end ||
       unsigned(start) >= legLengths.size() ||
-      unsigned(end) >= legLengths.size() || Length==0)
+      unsigned(end) >= legLengths.size() || !(length>0))
     return 0.0;
 
   int dist = 0;
   for (int k = start; k<end; k++)
     dist += legLengths[k];
 
-  return max(1.0, double(dist) / double(Length));
+  return max(1.0, double(dist) / double(length));
 }
 
-
-const wstring &oCourse::getControlOrdinal(int controlIndex) const
-{
-  if ( (controlIndex + 1 == nControls && useLastAsFinish())  || controlIndex == nControls)
+const wstring& oCourse::getControlOrdinal(int controlIndex) const {
+  if ((controlIndex + 1 == nControls() && useLastAsFinish()) || controlIndex == nControls())
     return lang.tl("Mål");
 
   if (oe->dataRevision != cacheDataRevision)
@@ -877,33 +872,30 @@ const wstring &oCourse::getControlOrdinal(int controlIndex) const
   if (size_t(controlIndex) < cachedControlOrdinal.size() && !cachedControlOrdinal[controlIndex].empty())
     return cachedControlOrdinal[controlIndex];
 
-  if (controlIndex > nControls)
+  if (controlIndex > nControls())
     throw meosException("Invalid index");
-  cachedControlOrdinal.resize(nControls);
+  cachedControlOrdinal.resize(nControls());
 
   int o = useFirstAsStart() ? 0 : 1;
   bool rogaining = hasRogaining();
 
-  for (int k = 0; k<controlIndex && k<nControls; k++) {
-    if (Controls[k] && !Controls[k]->isRogaining(rogaining))
+  for (int k = 0; k < controlIndex && k < nControls(); k++) {
+    if (controls[k] && !controls[k]->isRogaining(rogaining))
       o++;
   }
   cachedControlOrdinal[controlIndex] = itow(o);
   return cachedControlOrdinal[controlIndex];
 }
 
-void oCourse::setRogainingPointsPerMinute(int p)
-{
+void oCourse::setRogainingPointsPerMinute(int p) {
   getDI().setInt("RReduction", p);
 }
 
-int oCourse::getRogainingPointsPerMinute() const
-{
+int oCourse::getRogainingPointsPerMinute() const {
   return getDCI().getInt("RReduction");
 }
 
-int oCourse::calculateReduction(int overTime) const
-{
+int oCourse::calculateReduction(int overTime) const {
   int reduction = 0;
   if (overTime > 0) {
     int method = getDCI().getInt("RReductionMethod");
@@ -915,28 +907,23 @@ int oCourse::calculateReduction(int overTime) const
   return reduction;
 }
 
-
-void oCourse::setMinimumRogainingPoints(int p)
-{
+void oCourse::setMinimumRogainingPoints(int p) {
   cachedHasRogaining = 0;
   getDI().setInt("RPointLimit", p);
 }
 
-int oCourse::getMinimumRogainingPoints() const
-{
+int oCourse::getMinimumRogainingPoints() const {
   return getDCI().getInt("RPointLimit");
 }
 
-void oCourse::setMaximumRogainingTime(int p)
-{
+void oCourse::setMaximumRogainingTime(int p) {
   cachedHasRogaining = 0;
   if (p == NOTIME)
     p = 0;
   getDI().setInt("RTimeLimit", p);
 }
 
-int oCourse::getMaximumRogainingTime() const
-{
+int oCourse::getMaximumRogainingTime() const {
   return getDCI().getInt("RTimeLimit");
 }
 
@@ -961,23 +948,22 @@ void oCourse::clearCache() const {
   tMapsUsedNoVacant = -1;
 }
 
-wstring oCourse::getCourseProblems() const
-{
+wstring oCourse::getCourseProblems() const {
   int max_time = getMaximumRogainingTime();
   int min_point = getMinimumRogainingPoints();
 
   if (max_time > 0) {
-    for (int k = 0; k<nControls; k++) {
-      if (Controls[k]->isRogaining(true))
+    for (int k = 0; k< nControls(); k++) {
+      if (controls[k]->isRogaining(true))
         return L"";
     }
     return L"Banan saknar rogainingkontroller.";
   }
   else if (min_point > 0) {
     int max_p = 0;
-    for (int k = 0; k<nControls; k++) {
-      if (Controls[k]->isRogaining(true))
-        max_p += Controls[k]->getRogainingPoints();
+    for (int k = 0; k< nControls(); k++) {
+      if (controls[k]->isRogaining(true))
+        max_p += controls[k]->getRogainingPoints();
     }
 
     if (max_p < min_point) {
@@ -987,14 +973,12 @@ wstring oCourse::getCourseProblems() const
   return L"";
 }
 
-void oCourse::remove()
-{
+void oCourse::remove() {
   if (oe)
     oe->removeCourse(Id);
 }
 
-bool oCourse::canRemove() const
-{
+bool oCourse::canRemove() const {
   return !oe->isCourseUsed(Id);
 }
 
@@ -1025,15 +1009,15 @@ void oCourse::lastAsFinish(bool f) {
 }
 
 int oCourse::getFinishPunchType() const {
-  if (useLastAsFinish() && nControls > 0)
-    return Controls[nControls - 1]->Numbers[0];
+  if (useLastAsFinish() && nControls() > 0)
+    return controls.back()->Numbers[0];
   else
     return oPunch::PunchFinish;
 }
 
 int oCourse::getStartPunchType() const {
-  if (useFirstAsStart() && nControls > 0)
-    return Controls[0]->Numbers[0];
+  if (useFirstAsStart() && nControls() > 0)
+    return controls[0]->Numbers[0];
   else
     return oPunch::PunchStart;
 }
@@ -1059,8 +1043,8 @@ int oCourse::getNumLoops() const {
     return 0;
   bool wasCC = true;
   int loopCount = 0;
-  for (int i = 0; i < nControls; i++) {
-    if (Controls[i]->getId() == cc)
+  for (int i = 0; i < nControls(); i++) {
+    if (controls[i]->getId() == cc)
       wasCC = true;
     else if (wasCC) {
       loopCount++;
@@ -1073,8 +1057,8 @@ int oCourse::getNumLoops() const {
 void oCourse::setCommonControl(int ctrlId) {
   if (ctrlId != 0) {
     int found = 0;
-    for (int k = 0; k < nControls; k++) {
-      if (Controls[k]->getId() == ctrlId)
+    for (int k = 0; k < nControls(); k++) {
+      if (controls[k]->getId() == ctrlId)
         found++;
     }
     if (found == 0)
@@ -1084,9 +1068,6 @@ void oCourse::setCommonControl(int ctrlId) {
 }
 
 pCourse oCourse::getAdapetedCourse(const oCard &card, oCourse &tmpCourse, int &numShorten) const {
-  /*adaptedToOriginalCardOrder.resize(nControls + 1);
-  for (int k = 0; k < nControls + 1; k++)
-    adaptedToOriginalCardOrder[k] = k;*/
   int cc = getCommonControl();
   if (cc == 0)
     return pCourse(this);
@@ -1191,24 +1172,25 @@ pCourse oCourse::getAdapetedCourse(const oCard &card, oCourse &tmpCourse, int &n
   tmpCourse.cachedControlOrdinal.clear();
   tmpCourse.cachedHasRogaining = cachedHasRogaining;
   memcpy(tmpCourse.oData, oData, sizeof(oData));
-  tmpCourse.nControls = 0;
-  tmpCourse.Length = Length;
-  tmpCourse.Name = Name;
+  tmpCourse.length = length;
+  tmpCourse.name = name;
   tmpCourse.sqlUpdated = "TMP"; // Mark as tmp to prevent accidental write to DB
   tmpCourse.tMapToOriginalOrder.clear();
-  tmpCourse.tMapToOriginalOrder.reserve(nControls+1);
+  tmpCourse.tMapToOriginalOrder.reserve(nControls() + 1);
+  tmpCourse.controls.clear();
+  tmpCourse.legLengths.clear();
 
   if (firstAsStart) {
     tmpCourse.tMapToOriginalOrder.push_back(0);
-    tmpCourse.Controls[tmpCourse.nControls++] = Controls[0];
+    tmpCourse.controls.push_back(controls[0]);
     if (0 < legLengths.size())
       tmpCourse.legLengths.push_back(legLengths[0]);
   }
   bool allowShorten = getShorterVersion().first;
   numShorten = 0;
-  bool lastAsFinish = useLastAsFinish() || Controls[nControls-1]->getId() == cc;
+  bool lastAsFinish = useLastAsFinish() || controls.back()->getId() == cc;
 
-  int endIx = lastAsFinish ? nControls - 1 : nControls;
+  int endIx = lastAsFinish ? nControls() - 1 : nControls();
 
   for (size_t k = 0; k< loopOrder.size(); k++) {
     if (allowShorten && assignedKeys[loopOrder[k]] == -1) {
@@ -1219,14 +1201,14 @@ pCourse oCourse::getAdapetedCourse(const oCard &card, oCourse &tmpCourse, int &n
     int end = size_t(loopOrder[k] + 1) < ccIndex.size() ? ccIndex[loopOrder[k] + 1] : endIx;
     for (int i = start + 1; i < end; i++) {
       tmpCourse.tMapToOriginalOrder.push_back(i);
-      tmpCourse.Controls[tmpCourse.nControls++] = Controls[i];
+      tmpCourse.controls.push_back(controls[i]);
       if (size_t(i) < legLengths.size())
         tmpCourse.legLengths.push_back(legLengths[i]);
     }
     tmpCourse.tMapToOriginalOrder.push_back(end);
     if (k + 1 < loopOrder.size()) {
       int currentCC = ccIndex[k+1];
-      tmpCourse.Controls[tmpCourse.nControls++] = Controls[currentCC];
+      tmpCourse.controls.push_back(controls[currentCC]);
       if (size_t(end) < legLengths.size())
         tmpCourse.legLengths.push_back(legLengths[end]);
     }
@@ -1238,24 +1220,24 @@ pCourse oCourse::getAdapetedCourse(const oCard &card, oCourse &tmpCourse, int &n
       lastAsFinish = false;  
     }
     else {
-      if (tmpCourse.nControls > 0) {
+      if (tmpCourse.nControls() > 0) {
         tmpCourse.tMapToOriginalOrder.pop_back();
-        tmpCourse.nControls--;
+        tmpCourse.controls.pop_back();
         if (!legLengths.empty())
           tmpCourse.legLengths.pop_back();
       }
     }
   }
   if (lastAsFinish) {
-    tmpCourse.tMapToOriginalOrder.push_back(nControls);
-    tmpCourse.Controls[tmpCourse.nControls++] = Controls[nControls - 1];
-    if (size_t(nControls-1) < legLengths.size())
-      tmpCourse.legLengths.push_back(legLengths[nControls-1]);
+    tmpCourse.tMapToOriginalOrder.push_back(nControls());
+    tmpCourse.controls.push_back(controls.back());
+    if (size_t(nControls() - 1) < legLengths.size())
+      tmpCourse.legLengths.push_back(legLengths[nControls() - 1]);
   }
 
   if (!allowShorten) {
-    assert(tmpCourse.nControls == nControls);
-    assert(tmpCourse.tMapToOriginalOrder.size() == nControls + 1);
+    assert(tmpCourse.nControls() == nControls());
+    assert(tmpCourse.tMapToOriginalOrder.size() == nControls() + 1);
   }
 
   if (!legLengths.empty()) {
@@ -1300,21 +1282,21 @@ int oCourse::matchLoopKey(const vector<int> &punches, const vector<pControl> &ke
 bool oCourse::constructLoopKeys(int cc, vector< vector<pControl> > &loopKeys, vector<int> &ccIndex) const {
   bool firstAsStart = useFirstAsStart();
   if (firstAsStart) { // Only if it is a unique control
-    for (int k = 1; k < nControls; k++) {
-      if (Controls[k] == Controls[0]) {
+    for (int k = 1; k < nControls(); k++) {
+      if (controls[k] == controls[0]) {
         firstAsStart = false;
         break;
       }
     }
   }
 
-  if (Controls[0]->getId() == cc)
+  if (controls[0]->getId() == cc)
     firstAsStart = true; // Handle a course that starts with the loop control
 
   bool lastAsFinish = useLastAsFinish();
   if (lastAsFinish) { // Only if it is a unique control
-    for (int k = 0; k < nControls - 1; k++) {
-      if (Controls[k] == Controls[nControls-1]) {
+    for (int k = 0; k < nControls() - 1; k++) {
+      if (controls[k] == controls.back()) {
         lastAsFinish = false;
         break;
       }
@@ -1322,11 +1304,11 @@ bool oCourse::constructLoopKeys(int cc, vector< vector<pControl> > &loopKeys, ve
   }
 
   int startIx = firstAsStart ? 1 : 0;
-  int endIx = lastAsFinish ? nControls : nControls-1;
+  int endIx = lastAsFinish ? nControls() : nControls() - 1;
 
   ccIndex.push_back(startIx-1);
   for (int k = startIx; k < endIx; k++) {
-    if (Controls[k]->getId() == cc)
+    if (controls[k]->getId() == cc)
       ccIndex.push_back(k);
   }
   if (ccIndex.size() <= 1)
@@ -1342,9 +1324,9 @@ bool oCourse::constructLoopKeys(int cc, vector< vector<pControl> > &loopKeys, ve
     changed = false;
     for (size_t k = 0; k < ccIndex.size(); k++) {
       int keyIx = ccIndex[k] + keyIndex;
-      int nextIx = (k + 1) < ccIndex.size() ? ccIndex[k+1] : nControls;
-      if (keyIx < nextIx && Controls[keyIx]->isSingleStatusOK() && Controls[keyIx]->nNumbers == 1) {
-        loopKeys[k].push_back(Controls[keyIx]);
+      int nextIx = (k + 1) < ccIndex.size() ? ccIndex[k+1] : nControls();
+      if (keyIx < nextIx && controls[keyIx]->isSingleStatusOK() && controls[keyIx]->nNumbers == 1) {
+        loopKeys[k].push_back(controls[keyIx]);
         changed = true;
       }
     }
@@ -1373,18 +1355,18 @@ void oCourse::changedObject() {
 }
 
 int oCourse::getCourseControlId(int controlIx) const {
-  if (controlIx >= nControls) {
+  if (controlIx >= nControls()) {
     assert(false);
     return -1;
   }
 
-  int id = Controls[controlIx] ? Controls[controlIx]->getId() : 0;
+  int id = controls[controlIx] ? controls[controlIx]->getId() : 0;
   if (id == 0)
     return 0;
 
   int count = 0;
   for (int j = 0; j < controlIx; j++) {
-    if (Controls[j] && Controls[j]->Id == id)
+    if (controls[j] && controls[j]->Id == id)
       count++;
   }
 
@@ -1396,14 +1378,14 @@ wstring oCourse::getRadioName(int courseControlId) const {
   pControl pc = 0;
   int numRadio = 0;
   int clsix = 1;
-  for (int k = 0; k < nControls; k++) {
-    if (Controls[k]) {
-      if (Controls[k]->isValidRadio())
+  for (int k = 0; k < nControls(); k++) {
+    if (controls[k]) {
+      if (controls[k]->isValidRadio())
         numRadio++;
 
-      if (Controls[k]->Id == idix.first) {
+      if (controls[k]->Id == idix.first) {
         if (idix.second == 0) {
-          pc = Controls[k];
+          pc = controls[k];
           break;
         }
         else {
@@ -1459,16 +1441,21 @@ void oCourse::setShorterVersion(bool activeShortening, pCourse shorten) {
 }
 
 bool oCourse::hasControl(const oControl *ctrl) const {
-  for (int i = 0; i < nControls; i++) {
-    if (Controls[i] == ctrl)
+  for (int i = 0; i < nControls(); i++) {
+    if (controls[i] == ctrl)
       return true;
   }
+  if (finish == ctrl)
+    return true;
+  if (start == ctrl)
+    return true;
+
   return false;
 }
 
 bool oCourse::hasControlCode(int code) const {
-  for (int i = 0; i < nControls; i++) {
-    if (Controls[i]->hasNumber(code))
+  for (int i = 0; i < nControls(); i++) {
+    if (controls[i]->hasNumber(code))
       return true;
   }
   return false;
@@ -1552,7 +1539,7 @@ void oCourse::addTableRow(Table &table) const {
   table.set(row++, *it, TID_CLASSNAME, clsStr, false);
 
   for (int i = 0; i < getNumControls(); i++) {
-    table.set(row++, *it, 100+i, Controls[i] ? itow(Controls[i]->getId()) : L"", true);
+    table.set(row++, *it, 100+i, controls[i] ? itow(controls[i]->getId()) : L"", true);
   }
   oe->oCourseData->fillTableCol(*this, table, true);
 }
@@ -1584,7 +1571,7 @@ pair<int, bool> oCourse::inputData(int id, const wstring &input,
       if (cix == getNumControls())
         addControl(ctrl->getId());
       else {
-        Controls[cix] = ctrl;
+        controls[cix] = ctrl;
         updateChanged();
       }
       oe->reEvaluateCourse(getId(), false);
@@ -1604,13 +1591,13 @@ void oCourse::fillInput(int id, vector< pair<wstring, size_t> > &out, size_t &se
 
 void oCourse::getNameAndFamily(wstring& name, wstring& family) const {
   vector<wstring> fn;
-  split(this->Name, L":", fn);
+  split(this->name, L":", fn);
   if (fn.size() == 2) {
     family = std::move(fn[0]);
     name = std::move(fn[1]);
   }
   else {
-    name = this->Name;
+    name = this->name;
     family = L"";
   }
 }

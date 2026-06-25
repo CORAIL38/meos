@@ -5,7 +5,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -208,11 +208,12 @@ class DataRevisionCache {
   mutable T data;
   mutable unsigned long revision = -1;
 public:
-  void update(const oEvent& oe, const T& value) const;
+  void update(const oEvent &oe, const T &value) const;
+  void update(const oEvent &oe, T &&value) const;
 
-  bool needsUpdate(const oEvent& oe) const;
+  bool needsUpdate(const oEvent &oe) const;
 
-  const T& get() const {
+  const T &get() const {
     return data;
   }
 };

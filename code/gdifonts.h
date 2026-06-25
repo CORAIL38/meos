@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -48,6 +48,7 @@ constexpr int pageNewPage=100;
 constexpr int pagePageInfo=102;
 constexpr int pageNewChapter = 103;
 
+constexpr int textLeft = 0; // Default
 constexpr int textRight=256;
 constexpr int textCenter=512;
 constexpr int timerCanBeNegative=1024;
@@ -78,7 +79,7 @@ enum GDICOLOR {
   colorLightBlue = RGB(235, 238, 254),
   colorLightRed = RGB(253, 219, 235),
   colorLightGreen = RGB(219, 247, 209),
-  colorLightYellow = RGB(248, 248, 216),
+  colorLightYellow = RGB(247, 244, 230),
   colorLightCyan = RGB(220, 249, 245),//RGB(200, 255, 255),
   colorLightMagenta = RGB(240, 207, 244),//RGB(255, 200, 255),
   

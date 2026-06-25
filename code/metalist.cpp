@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -40,6 +40,7 @@
 #include "image.h"
 #include "binencoder.h"
 #include "TabAuto.h"
+#include "xmlparser.h"
 
 extern oEvent *gEvent;
 extern Image image;
@@ -507,34 +508,52 @@ bool MetaList::isBreak(int x) {
           || x == ')' || x=='/' || (x>30 && x < 127 && !isalnum(x));
 }
 
-wstring MetaList::encode(EPostType type, const wstring &inputS, bool &foundSymbol) {
+wstring MetaList::encode(EPostType type, const wstring& inputS, bool& foundSymbol) {
   if (inputS.empty()) {
     foundSymbol = true; // No symbol needed
     return inputS;
   }
   wstring out;
-  wstring input = lang.tl(inputS);
-  
+  bool outputNumberType = (type == EPostType::lResultModuleNumber || type == EPostType::lResultModuleNumberTeam) &&
+    inputS.length() > 0 && inputS[0] == '@';
+
+  wstring input;
+  if (outputNumberType) {
+    vector<wstring> sv;
+    split(inputS.substr(1), L";", sv);
+    for (auto& s : sv) {
+      if (input.empty())
+        input = L"@";
+      else
+        input += L";";
+
+      input += lang.tl(s);
+    }
+
+    if (input.empty())
+      input = L"@";
+  }
+  else
+    input = lang.tl(inputS);
+
   out.reserve(input.length() + 5);
   int sCount = 0;
   if (type == EPostType::lString)
     sCount = 1; // No symbols expected in string
-  bool outputNumberType = (type == EPostType::lResultModuleNumber || type == EPostType::lResultModuleNumberTeam) &&
-                          input.length() > 0 && input[0] == '@';
 
-  for (size_t k = 0; k<input.length(); k++) {
+  for (size_t k = 0; k < input.length(); k++) {
     int c = input[k];
-    int p = k > 0 ? input[k-1] : ' ';
-    int n = k+1 < input.length() ? input[k+1] : ' ';
+    int p = k > 0 ? input[k - 1] : ' ';
+    int n = k + 1 < input.length() ? input[k + 1] : ' ';
 
-    if (outputNumberType && c == ';') 
+    if (outputNumberType && c == ';')
       sCount = 0;
-    
+
     if (c == '%') {
       out.push_back('%');
       out.push_back('%');
     }
-    else if (c == 'X' &&  isBreak(n) && isBreak(p) && sCount == 0) {
+    else if (c == 'X' && isBreak(n) && isBreak(p) && sCount == 0) {
       out.push_back('%');
       out.push_back('s');
       sCount++;
@@ -832,12 +851,12 @@ void MetaList::interpret(oEvent *oe, const gdioutput &gdi, const oListParam &par
             font = mp.font;
 
           bool dmy;
-          vector<pair<EPostType, wstring>> typeFormats;
-          typeFormats.push_back(make_pair(mp.type, encode(mp.type, mp.text, dmy)));
+          vector<tuple<EPostType, int, wstring>> typeFormats;
+          typeFormats.emplace_back(mp.type, mp.leg, encode(mp.type, mp.text, dmy));
           size_t kk = k+1;
           //Add merged entities
           while (kk < cline.size() && cline[kk].mergeWithPrevious) {
-            typeFormats.push_back(make_pair(cline[kk].type, encode(cline[kk].type, cline[kk].text, dmy)));
+            typeFormats.emplace_back(cline[kk].type, cline[kk].leg, encode(cline[kk].type, cline[kk].text, dmy));
             kk++;
           }
           if (mp.limitWidth && mp.blockWidth > 0)
@@ -1636,28 +1655,28 @@ void MetaList::load(const xmlobject &xDef) {
 
   if (xHeadFont) {
     const wchar_t *f = xHeadFont.getWPtr();
-    fontFaces[MLHead].font = f != nullptr ? f : L"arial";
+    fontFaces[MLHead].font = f != nullptr ? f : L"Arial";
     fontFaces[MLHead].scale = xHeadFont.getObjectInt("scale");
     fontFaces[MLHead].extraSpaceAbove = xHeadFont.getObjectInt("above");
   }
 
   if (xSubHeadFont) {
     const wchar_t *f = xSubHeadFont.getWPtr();
-    fontFaces[MLSubHead].font = f != nullptr ? f : L"arial";
+    fontFaces[MLSubHead].font = f != nullptr ? f : L"Arial";
     fontFaces[MLSubHead].scale = xSubHeadFont.getObjectInt("scale");
     fontFaces[MLSubHead].extraSpaceAbove = xSubHeadFont.getObjectInt("above");
   }
 
   if (xListFont) {
     const wchar_t *f = xListFont.getWPtr();
-    fontFaces[MLList].font = f != nullptr ? f : L"arial";
+    fontFaces[MLList].font = f != nullptr ? f : L"Arial";
     fontFaces[MLList].scale = xListFont.getObjectInt("scale");
     fontFaces[MLList].extraSpaceAbove = xListFont.getObjectInt("above");
   }
 
   if (xSubListFont) {
     const wchar_t *f = xSubListFont.getWPtr();
-    fontFaces[MLSubList].font = f != nullptr ? f : L"arial";
+    fontFaces[MLSubList].font = f != nullptr ? f : L"Arial";
     fontFaces[MLSubList].scale = xSubListFont.getObjectInt("scale");
     fontFaces[MLSubList].extraSpaceAbove = xSubListFont.getObjectInt("above");
   }
@@ -2278,6 +2297,7 @@ void MetaList::initSymbols() {
     typeToSymbol[lRunnerId] = L"RunnerId";
 
     typeToSymbol[lTeamName] = L"TeamName";
+    typeToSymbol[lTeamNameRaw] = L"TeamNameRaw";
     typeToSymbol[lTeamStart] = L"TeamStart";
     typeToSymbol[lTeamCourseName] = L"TeamCourseName";
     typeToSymbol[lTeamCourseNumber] = L"TeamCourseNumber";
@@ -2355,10 +2375,12 @@ void MetaList::initSymbols() {
     typeToSymbol[lRunnerDataA] = L"RunnerDataA";
     typeToSymbol[lRunnerDataB] = L"RunnerDataB";
     typeToSymbol[lRunnerTextA] = L"RunnerTextA";
+    typeToSymbol[lRunnerAnnotation] = L"RunnerAnnotation";
 
     typeToSymbol[lTeamDataA] = L"TeamDataA";
     typeToSymbol[lTeamDataB] = L"TeamDataB";
     typeToSymbol[lTeamTextA] = L"TeamTextA";
+    typeToSymbol[lTeamAnnotation] = L"TeamAnnotation";
 
     typeToSymbol[lClassDataA] = L"ClassDataA";
     typeToSymbol[lClassDataB] = L"ClassDataB";
@@ -2384,7 +2406,13 @@ void MetaList::initSymbols() {
     typeToSymbol[lControlMistakeQuotient] = L"ControlMistakeQuotient";
     typeToSymbol[lControlRunnersLeft] = L"ControlRunnersLeft";
     typeToSymbol[lControlCodes] = L"ControlCodes";
-    
+
+    typeToSymbol[lRogainingLeg] = L"RogainingLeg";
+    typeToSymbol[lRogainingLegFrom] = L"RogainingLegFrom";
+    typeToSymbol[lRogainingLegTo] = L"RogainingLegTo";
+    typeToSymbol[lRogainingLegBestTime] = L"RogainingLegBestTime";
+    typeToSymbol[lRogainingLegNumCompetitors] = L"RogainingLegNumCompetitors";
+
     typeToSymbol[lNumEntries] = L"NumEntries";
     typeToSymbol[lNumStarts] = L"NumStarts";
     typeToSymbol[lTotalRunLength] = L"TotalRunLength";
@@ -2416,6 +2444,8 @@ void MetaList::initSymbols() {
     baseTypeToSymbol[oListInfo::EBaseTypeTeamGlobal] = "TeamGlobal";
     baseTypeToSymbol[oListInfo::EBaseTypeControl] = "Control";
     baseTypeToSymbol[oListInfo::EBaseTypeCourse] = "Course";
+    baseTypeToSymbol[oListInfo::EBaseTypeRGLeg] = "RogainingLegs";
+    baseTypeToSymbol[oListInfo::EBaseTypeRGLegGlobal] = "RogainingLegsGlobal";
 
     for (map<oListInfo::EBaseType, string>::iterator it = baseTypeToSymbol.begin();
       it != baseTypeToSymbol.end(); ++it) {
@@ -2445,6 +2475,7 @@ void MetaList::initSymbols() {
     orderToSymbol[SortByEntryTime] = "EntryTime";
     orderToSymbol[SortByBib] = "Bibs";
     orderToSymbol[ClassPoints] = "ClassPoints";
+    orderToSymbol[ClassTotalPoints] = "ClassTotalPoints";
     orderToSymbol[ClassTotalResult] = "ClassTotalResult";
     orderToSymbol[ClassTeamLegResult] = "ClassTeamLegResult";
     orderToSymbol[CourseResult] = "CourseResult";
@@ -2480,6 +2511,7 @@ void MetaList::initSymbols() {
     filterToSymbol[EFilterIncludeNotParticipating] = "EFilterIncludeNotParticipating";
     filterToSymbol[EFilterModifiedCard] = "EFilterModifiedCard";
     filterToSymbol[EFilterTimeNoResult] = "EFilterTimeNoResult";
+    filterToSymbol[EFilterUnexpectedPunchOrder] = "EFilterUnexpectedPunchOrder";
 
     for (map<EFilterList, string>::iterator it = filterToSymbol.begin();
       it != filterToSymbol.end(); ++it) {

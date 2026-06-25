@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -52,6 +52,9 @@ private:
 
   int numReportRow = 1;
   int numReportColumn = 1;
+  int numResults = 0;
+  bool includeSplits = true;
+  bool includeResults = false;
   bool hideReportControls = false;
   bool showReportHeader = true;
   void addToReport(int cardNo, bool punchForShowReport);
@@ -94,10 +97,12 @@ private:
   bool listenToPunches;
   deque<pair<int, bool>> runnersToReport;
 
-  vector<pRunner> unknown_dns;
-  vector<pRunner> known_dns;
-  vector<pRunner> known;
-  vector<pRunner> unknown;
+  vector<int> unknown_dns;
+  vector<int> known_dns;
+  vector<int> known;
+  vector<int> unknown;
+
+  vector<pRunner> getRunners(const vector<int>& ids) const;
   void clearInForestData();
   bool savePunchTime(pRunner r, gdioutput &gdi);
 
@@ -108,15 +113,15 @@ private:
 
   
   static void runnerReport(oEvent &oe, gdioutput &gdi, 
-                           int id, bool compactReport, 
-                           int maxWidth, 
-                           RECT& rc);
+                           int id, int maxWidth, 
+                           bool includeSplits, int numResults, RECT& rc);
 
   static void teamReport(oEvent& oe, gdioutput& gdi,
                          const oTeam *team,
                          bool onlySelectedRunner,
                          const deque<pair<int, bool>> &runners,
                          int maxWidth,
+                         bool includeSplits, int numResults,
                          RECT &rc);
 
 
@@ -136,7 +141,8 @@ private:
   static void autoGrowCourse(gdioutput &gdi);
 
   void loadEconomy(gdioutput &gdi, oRunner &r, gdioutput *gdiMain, TabRunner *mainTab);
-  
+  static void unpairCard(pRunner r);
+
   class EconomyHandler : public GuiHandler {
     int runnerId;
     oEvent *oe;
@@ -201,7 +207,9 @@ public:
     gdioutput &gdi, 
     int numX, int numY,
     bool onlySelectedRunner,
-    const deque<pair<int, bool>> &runnersToReport);
+    const deque<pair<int, bool>> &runnersToReport,
+    bool includeSplits,
+    int numResults);
 
   TabRunner(oEvent *oe);
   ~TabRunner(void);

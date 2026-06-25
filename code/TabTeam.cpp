@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -197,7 +197,7 @@ void TabTeam::selectTeam(gdioutput &gdi, pTeam t)
 
       gdi.setText("TimeIn", t->getInputTimeS());
       if (gdi.hasWidget("PointIn"))
-        gdi.setText("PointIn", t->getInputPoints());
+        gdi.setText("PointIn", oe->formatScore(t->getInputPoints()));
     }
 
     if (gdi.hasWidget("NoRestart")) {
@@ -275,7 +275,7 @@ void TabTeam::updateTeamStatus(gdioutput &gdi, pTeam t)
   gdi.setText("Finish",t->getFinishTimeS(false, SubSecond::Auto));
   gdi.setText("Time", t->getRunningTimeS(true, SubSecond::Auto));
   gdi.setText("TimeAdjust", formatTimeMS(t->getTimeAdjustment(false), false, SubSecond::Auto));
-  gdi.setText("PointAdjust", -t->getPointAdjustment());
+  gdi.setText("PointAdjust", oe->formatScore(-t->getPointAdjustment()));
   gdi.selectItemByData("Status", t->getStatus());
 
   auto ri = t->getRaceInfo();
@@ -386,7 +386,7 @@ bool TabTeam::save(gdioutput &gdi, bool dontReloadTeams) {
     classes.insert(t->getClassId(false));
 
     bool readStatusIn = true;
-    if (newClass && t->getInputStatus() != StatusNotCompetiting && t->hasInputData()) {
+    if (newClass && t->getInputStatus() != StatusNotCompeting && t->hasInputData()) {
       if (gdi.ask(L"Vill du sätta resultatet från tidigare etapper till <Deltar ej>?")) {
         t->resetInputData();
         readStatusIn = false;
@@ -412,7 +412,7 @@ bool TabTeam::save(gdioutput &gdi, bool dontReloadTeams) {
         t->setTimeAdjustment(time);
     }
     if (gdi.hasWidget("PointAdjust")) {
-      t->setPointAdjustment(-gdi.getTextNo("PointAdjust"));
+      t->setPointAdjustment(-oe->convertScore(gdi.getText("PointAdjust")));
     }
 
     if (gdi.hasWidget("StatusIn") && readStatusIn) {
@@ -420,7 +420,7 @@ bool TabTeam::save(gdioutput &gdi, bool dontReloadTeams) {
       t->setInputPlace(gdi.getTextNo("PlaceIn"));
       t->setInputTime(gdi.getText("TimeIn"));
       if (gdi.hasWidget("PointIn"))
-        t->setInputPoints(gdi.getTextNo("PointIn"));
+        t->setInputPoints(oe->convertScore(gdi.getText("PointIn")));
     }
 
     pClass pc=oe->getClass(classId);
@@ -737,7 +737,7 @@ int TabTeam::teamCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
         }
         else {
           oldR->setClassId(0, true);
-          vector<int> mp;
+          vector<pair<int, pControl>> mp;
           oldR->evaluateCard(true, mp, 0, oBase::ChangeType::Update);
           oldR->synchronize(true);
           t->setRunner(leg, r, true);
@@ -1148,6 +1148,7 @@ int TabTeam::teamCB(gdioutput &gdi, GuiEventType type, BaseInfo* data) {
               gdi.setText(bf, ii.text);
             }
           }
+          enableRunner(gdi, i, !ii.text.empty());
           break;
         }
       }
@@ -1338,7 +1339,8 @@ void TabTeam::loadTeamMembers(gdioutput &gdi, int ClassId, int ClubId, pTeam t)
     gdi.addStringUT(yp + textOffY, numberPos, 0, pc->getLegNumber(i) + L".");
     if (pc->getLegRunner(i) == i) {
       gdi.addInput(xp + dx[0], yp, bf, L"", 18, TeamCB);//Name
-      gdi.addButton(xp + dx[1], yp - 2, gdi.scaleLength(28), "DR" + itos(i), L"\u21C6", TeamCB, L"Knyt löpare till sträckan.", false, false); // Change
+      if (pc->isTeamClass())
+        gdi.addButton(xp + dx[1], yp - 2, gdi.scaleLength(28), "DR" + itos(i), L"\u21C6", TeamCB, L"Knyt löpare till sträckan.", false, false); // Change
       sprintf_s(bf_si, "SI%d", i);
       hasSI = true;
       gdi.addInput(xp + dx[2], yp, bf_si, L"", 7, TeamCB).setExtra(i); //Si
@@ -1992,36 +1994,14 @@ void TabTeam::processChangeRunner(gdioutput &gdi, pTeam t, int leg, pRunner r) {
     save(gdi, true);
     vector<int> mp;
     switchRunners(t, leg, r, oldR);
-    /*if (r->getTeam()) {
-      pTeam otherTeam = r->getTeam();
-      int otherLeg = r->getLegNumber();
-      otherTeam->setRunner(otherLeg, oldR, true);
-      if (oldR)
-        oldR->evaluateCard(true, mp, 0, true);
-      otherTeam->checkValdParSetup();
-      otherTeam->apply(true, 0, false);
-      otherTeam->synchronize(true);
-    }
-    else if (oldR) {
-      t->setRunner(leg, 0, false);
-      t->synchronize(true);
-      oldR->setClassId(r->getClassId(), true);
-      oldR->evaluateCard(true, mp, 0, true);
-      oldR->synchronize(true);
-    }
-
-    t->setRunner(leg, r, true);
-    r->evaluateCard(true, mp, 0, true);
-    t->checkValdParSetup();
-    t->apply(true, 0, false);
-    t->synchronize(true);*/
     loadPage(gdi);
   }
 }
 
 void TabTeam::switchRunners(pTeam t, int leg, pRunner r, pRunner oldR) {
-  vector<int> mp;
+  vector<pair<int, pControl>> mp;
   bool removeAnnonumousTeamMember = false;
+  int tId = t->getId();
   int crsIdR = r->getCourseId();
   int crsIdROld = oldR ? oldR->getCourseId() : 0;
   wstring oldBib = oldR ? oldR->getBib() : L"";
@@ -2053,16 +2033,20 @@ void TabTeam::switchRunners(pTeam t, int leg, pRunner r, pRunner oldR) {
     oldR->evaluateCard(true, mp, 0, oBase::ChangeType::Update);
     oldR->synchronize(true);
   }
+  t = oe->getTeam(tId);
 
-  t->setRunner(leg, r, true);
+  if (t) {
+    t->setRunner(leg, r, true);
+  }
   r->setCourseId(crsIdROld);
   r->setBib(oldBib, 0, false);
   r->evaluateCard(true, mp, 0, oBase::ChangeType::Update);
-  t->checkValdParSetup();
-  t->apply(oBase::ChangeType::Update, nullptr);
-  t->adjustMultiRunners();
-  t->synchronize(true);
-
+  if (t) {
+    t->checkValdParSetup();
+    t->apply(oBase::ChangeType::Update, nullptr);
+    t->adjustMultiRunners();
+    t->synchronize(true);
+  }
   if (removeAnnonumousTeamMember)
     oe->removeRunner({ oldR->getId() });
 }

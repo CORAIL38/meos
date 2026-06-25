@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,6 +36,8 @@
 #include "Table.h"
 #include "MeOSFeatures.h"
 #include <set>
+#include "xmlparser.h"
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -130,13 +132,18 @@ void oControl::setStatus(ControlStatus st){
   }
 }
 
-void oControl::setName(wstring name) {
-  if (name != getName()) {
+void oControl::setName(const wstring &name) {
+  if (name == getDefaultName()) {
+    if (!Name.empty()) {
+      Name = L"";
+      updateChanged();
+    }
+  }
+  else if (name != getName()) {
     Name = name;
     updateChanged();
   }
 }
-
 
 void oControl::set(const xmlobject* xo) {
   xmlList xl;
@@ -187,7 +194,7 @@ wstring oControl::getString() {
   if (Status == ControlStatus::StatusMultiple)
     num = codeNumbers('+');
   else if (Status == ControlStatus::StatusRogaining || Status == ControlStatus::StatusRogainingRequired)
-    num = codeNumbers('|') + L", " + itow(getRogainingPoints()) + L"p";
+    num = codeNumbers('|') + L" (" + (getRogainingPoints() != 0 ? oe->formatScore(getRogainingPoints()) : L"0") + L"p)";
   else
     num = codeNumbers('|');
 
@@ -212,7 +219,7 @@ wstring oControl::getLongString()
     return wstring(lang.tl("ALLA(")) + codeNumbers(',') + L")";
   }
   else if (Status == ControlStatus::StatusRogaining || Status == ControlStatus::StatusRogainingRequired)
-    return wstring(lang.tl("RG(")) + codeNumbers(',') + L"|" + itow(getRogainingPoints()) + L"p)";
+    return wstring(lang.tl("RG(")) + codeNumbers(',') + L"|" + (getRogainingPoints() != 0 ? oe->formatScore(getRogainingPoints()) : L"0") + L"p)";
   else
     return wstring(lang.tl("TRASIG(")) + codeNumbers(',') + L")";
 }
@@ -253,8 +260,7 @@ bool oControl::hasNumberUnchecked(int i)
   else return true;
 }
 
-int oControl::getNumMulti()
-{
+int oControl::getNumMulti() {
   if (Status== ControlStatus::StatusMultiple)
     return nNumbers;
   else
@@ -322,16 +328,22 @@ bool oControl::setNumbers(const wstring &numbers)
   return success;
 }
 
-wstring oControl::getName() const
-{
-	if (!Name.empty())
-		return Name;
-	else {
-		wchar_t bf[16];
-		swprintf_s(bf, L"[%d]", Id);
-		return bf;
-	}
+const wstring &oControl::getName() const {
+  if (!Name.empty())
+    return Name;
+  else
+    return getDefaultName();
 }
+
+/// Get name or [id]
+const wstring &oControl::getDefaultName() const {
+  wchar_t bf[16];
+  swprintf_s(bf, L"[%d]", Id);
+  wstring &res = StringCache::getInstance().wget();
+  res = bf;
+  return res;
+}
+
 
 wstring oControl::getIdS() const
 {
@@ -403,7 +415,7 @@ const vector<pair<wstring, size_t>>& oEvent::fillControls(vector< pair<wstring, 
           }
 
           if (it->Status == oControl::ControlStatus::StatusRogaining || it->Status == oControl::ControlStatus::StatusRogainingRequired)
-            b += L"\t(" + itow(it->getRogainingPoints()) + L"p)";
+            b += L"\t(" + (it->getRogainingPoints() != 0 ? oe->formatScore(it->getRogainingPoints()) : L"0") + L"p)";
           else if (it->Name.length() > 0) {
             b += L"\t(" + it->Name + L")";
           }
@@ -544,10 +556,8 @@ int oControl::getRogainingPoints() const
   return getDCI().getInt("Rogaining");
 }
 
-wstring oControl::getRogainingPointsS() const
-{
-  int pt = getRogainingPoints();
-  return pt != 0 ? itow(pt) : L"";
+wstring oControl::getRogainingPointsS() const {
+  return oe->formatScore(getRogainingPoints());
 }
 
 bool oControl::setTimeAdjust(int v) {
@@ -592,9 +602,8 @@ void oControl::setRogainingPoints(int v)
   getDI().setInt("Rogaining", v);
 }
 
-void oControl::setRogainingPoints(const string &s)
-{
-  setRogainingPoints(atoi(s.c_str()));
+void oControl::setRogainingPoints(const wstring &s) {
+  setRogainingPoints(oe->convertScore(s));
 }
 
 void oControl::startCheckControl()
@@ -609,14 +618,14 @@ wstring oControl::getInfo() const
   return getName();
 }
 
-void oControl::addUncheckedPunches(vector<int> &mp, bool supportRogaining) const
+void oControl::addUncheckedPunches(vector<pair<int, pControl>> &mp, bool supportRogaining) const
 {
   if (controlCompleted(supportRogaining))
     return;
 
   for (int k=0;k<nNumbers;k++)
     if (!checkedNumbers[k]) {
-      mp.push_back(Numbers[k]);
+      mp.emplace_back(Numbers[k], pControl(this));
 
       if (Status!= ControlStatus::StatusMultiple)
         return;
@@ -747,7 +756,7 @@ void oEvent::setupControlStatistics() const {
     }
 
     if (!r.isVacant() && r.getStatus() != StatusDNS && r.getStatus() != StatusCANCEL
-                        && r.getStatus() != StatusNotCompetiting) {
+                        && r.getStatus() != StatusNotCompeting) {
       bool foundRadio = false;
       bool unordered = pc->getCommonControl() != false;
       
@@ -884,7 +893,7 @@ const shared_ptr<Table> &oControl::getTable(oEvent *oe) {
     oe->oControlData->buildTableCol(table.get());
     oe->setTable("control", table);
 
-    table->setTableProp(Table::CAN_DELETE);
+    table->setTableProp(Table::CAN_DELETE | Table::CAN_PASTE);
   }
 
   return oe->getTable("control");
@@ -997,8 +1006,8 @@ void oEvent::getControls(vector<pControl> &c, bool calculateCourseControls) cons
     }
     for (oCourseList::const_iterator it = Courses.begin(); it != Courses.end(); ++it) {
       map<int, int> count;
-      for (int i = 0; i < it->nControls; i++) {
-        ++count[it->Controls[i]->getId()];
+      for (int i = 0; i < it->nControls(); i++) {
+        ++count[it->controls[i]->getId()];
       }
       for (map<int, int>::iterator it = count.begin(); it != count.end(); ++it) {
         unordered_map<int, pControl>::iterator res = cById.find(it->first);

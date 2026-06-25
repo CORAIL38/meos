@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,15 +24,18 @@
 
 class SpeakerMonitor;
 
-class spkClassSelection {
+class SpkClassSelection {
+  
   // The currently selected leg
-  int selectedLeg;
+  int selectedLeg = 0;
   // True if total results, otherwise stage results
-  bool total;
+  bool total = false;
   // Given a leg, get the corresponding (control, previous control) to watch
   map<int, pair<int, int> > legToControl;
 public:
-  spkClassSelection() : selectedLeg(0), total(false) {}
+  constexpr static int AllControls = 10000;
+
+  SpkClassSelection() : selectedLeg(0), total(false) {}
   void setLeg(bool totalIn, int leg) {total = totalIn, selectedLeg=leg;}
   int getLeg() const {return selectedLeg;}
   bool isTotal() const {return total;}
@@ -40,11 +43,13 @@ public:
   void setControl(int controlId, int previousControl) {
     legToControl[selectedLeg] = make_pair(controlId, previousControl);
   }
+
   int getControl()  {
     if (legToControl.count(selectedLeg)==1)
       return legToControl[selectedLeg].first;
-    else return -1;
+    else return AllControls;
   }
+
   int getPreviousControl()  {
     if (legToControl.count(selectedLeg)==1)
       return legToControl[selectedLeg].second;
@@ -57,34 +62,53 @@ class TabSpeaker :
 private:
   set<int> controlsToWatch;
   set<int> classesToWatch;
-  
+
+  enum class SpeakerView {
+    Default,
+    Settings,
+    Prio,
+    Table,
+    Manual,
+    Report
+  };
+
+  SpeakerView currentView = SpeakerView::Default;
+
   // For runner report
   int runnerId = -1;
 
   int lastControlToWatch;
   int lastClassToWatch;
 
+  static int defaultLimit;
+  int classLimit = -1;
   set<__int64> shownEvents;
   vector<oTimeLine> events;
   oTimeLine::Priority watchLevel;
   int watchNumber;
 
+  void showClassList(gdioutput& gdi, int classId);
   void generateControlList(gdioutput &gdi, int classId);
-  void generateControlListForLeg(gdioutput &gdi, int classId, int leg);
+
+  void showSettings(gdioutput& gdi);
+  void addToolbar(gdioutput& gdi);
 
   wstring lastControl;
 
   void manualTimePage(gdioutput &gdi) const;
   void storeManualTime(gdioutput &gdi);
 
-  //Curren class-
-  int classId;
-  //Map CourseNo -> selected Control.
-  //map<int, int> selectedControl;
-  map<int, spkClassSelection> selectedControl;
+  //Curren class
+  int classId = 0;
+  map<int, SpkClassSelection> selectedControl;
   int deducePreviousControl(int classId, int leg, int control);
 
-  bool ownWindow;
+  vector<int> getControlsToWatchForClass(int classId, int leg) const;
+
+  bool ownWindow = false;
+  bool lockedSettings = false;
+
+  pair<gdioutput*, TabSpeaker*> createSpeakerWindow(gdioutput& gdi, bool showEmpty);
 
   void drawTimeLine(gdioutput &gdi);
   void splitAnalysis(gdioutput &gdi, int xp, int yp, pRunner r);
@@ -101,7 +125,10 @@ private:
   static void loadSettings(vector< multimap<string, wstring> > &settings);
   static void saveSettings(const vector< multimap<string, wstring> > &settings);
   static wstring getSpeakerSettingsFile();
+
+  static void addEventsButton(gdioutput& gdi, int xp, int yp, int bw);
 public:
+  void showReport(gdioutput& gdi);
 
   void setSelectedRunner(const oRunner &r) { runnerId = r.getId(); }
 
@@ -122,5 +149,5 @@ public:
 
   bool loadPage(gdioutput &gdi);
   TabSpeaker(oEvent *oe);
-  ~TabSpeaker(void);
+  ~TabSpeaker();
 };

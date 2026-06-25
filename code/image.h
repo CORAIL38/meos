@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,6 +24,10 @@
 
 #include <map>
 #include <vector>
+#include <tuple>
+#include <utility>
+#include <cstdint>
+#include <string>
 
 
 class Image {
@@ -40,9 +44,9 @@ private:
 
   static void read_file(const wstring& filename, vector<uint8_t>& data);
 
-  static pair<HBITMAP, uint8_t*> read_png_file(const wstring& filename, int& width, int& height, uint64_t& hash, ImageMethod method);
-  static pair<HBITMAP, uint8_t*> read_png_resource(LPCTSTR lpName, LPCTSTR lpType, int& width, int& height, ImageMethod method);
-  static pair<HBITMAP, uint8_t*> read_png(vector<uint8_t>&& data, int& width, int& height, ImageMethod method);
+  static tuple<HBITMAP, uint8_t*, bool> read_png_file(const wstring& filename, int& width, int& height, uint64_t& hash, ImageMethod method);
+  static tuple<HBITMAP, uint8_t*, bool> read_png_resource(LPCTSTR lpName, LPCTSTR lpType, int& width, int& height, ImageMethod method);
+  static tuple<HBITMAP, uint8_t*, bool> read_png(vector<uint8_t>&& data, int& width, int& height, ImageMethod method);
 
   class Bmp {
   private:
@@ -57,8 +61,8 @@ private:
     wstring fileName;
     uint8_t* pixels = nullptr;
     vector<uint8_t> rawData;
-
-    HBITMAP getVersion(int width, int height);
+    bool hasTrueAlpha = false;
+    HBITMAP getVersion(int &width, int &height);
     void destroy();
 
     ~Bmp();
@@ -68,12 +72,14 @@ private:
 public:
 
   HBITMAP loadImage(uint64_t resource, ImageMethod method);
-  
+  HBITMAP getVersion(uint64_t resource, int sx, int sy);
+
   static vector<uint8_t> loadResourceToMemory(LPCTSTR lpName, LPCTSTR lpType);
 
   int getWidth(uint64_t resource);
   int getHeight(uint64_t resource);
-  void drawImage(uint64_t resource, ImageMethod method, HDC hDC, int x, int y, int width, int height);
+  void drawImage(uint64_t resource, ImageMethod method, HDC hDC, int x, int y, int width, int height, 
+                 int srcOffX, int srcOffY, int srcWidth, int srcHeight);
 
   uint64_t loadFromFile(const wstring& path, ImageMethod method);
   uint64_t loadFromMemory(const wstring& fileName, const vector<uint8_t> &bytes, ImageMethod method);

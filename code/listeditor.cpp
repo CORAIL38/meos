@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,7 +33,6 @@
 #include "gdifonts.h"
 #include "oEvent.h"
 #include "tabbase.h"
-#include "CommDlg.h"
 #include "generalresult.h"
 #include "gdiconstants.h"
 #include "autocomplete.h"
@@ -472,7 +471,7 @@ int ListEditor::editList(gdioutput &gdi, GuiEventType type, BaseInfo &data) {
       }
     }
     else if (bi.id == "NewImage") {
-      vector<pair<wstring, wstring>> ext = { make_pair(L">Bilder", L"*.png") };
+      vector<pair<wstring, wstring>> ext = { make_pair(L"Bilder", L"*.png") };
       wstring fn = gdi.browseForOpen(ext, L"png");
       if (!fn.empty()) {
         bool transparent = gdi.isChecked("TransparentWhite");
@@ -1175,7 +1174,7 @@ void ListEditor::editListPost(gdioutput &gdi, const MetaListPost &mlp, int id) {
   gdi.registerEvent("SearchRunner", editListCB).setKeyCommand(KC_FIND);
   gdi.registerEvent("SearchRunnerBack", editListCB).setKeyCommand(KC_FINDBACK);
 
-  gdi.addInput("SearchText", getSearchString(), 26, editListCB, L"",
+  gdi.addInput("SearchText", getSearchString(), 20, editListCB, L"",
                L"Sök symbol.").isEdit(false)
               .setBgColor(colorLightCyan).ignore(true);
   
@@ -1630,6 +1629,8 @@ const wchar_t *ListEditor::getIndexDescription(EPostType type) {
     return L"Index in X[index]#OutputNumbers";
   else if (MetaList::isAllStageType(type))
     return L"Applicera för specifik etapp:";
+  else if (type == lTeamAnnotation || type == lRunnerAnnotation)
+    return L"Text på visst radnummer:";
   else
     return L"Applicera för specifik sträcka:";
 }
@@ -1712,6 +1713,9 @@ bool ListEditor::legStageTypeIndex(gdioutput &gdi, EPostType type, int leg) {
         gdi.setText("Leg", ix);
       }
       gdi.setInputStatus("Leg", leg != -1);
+    }
+    else {
+      gdi.setTextTranslate("TUseLeg", getIndexDescription(type));
     }
   }
   

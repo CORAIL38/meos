@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,11 +29,12 @@
 #include <limits>
 #include <algorithm>
 
-#include "xmlparser.h"
 #include "oBase.h"
 #include "oPunch.h"
 
 class oControl;
+class xmlparser;
+class xmlobject;
 
 typedef oControl* pControl;
 class oDataInterface;
@@ -150,6 +151,11 @@ public:
   void getCourses(vector<pCourse> &crs) const;
   void getClasses(vector<pClass> &cls) const;
 
+  /** Return number of alternative punch codes*/
+  int getNNumbers() const {
+    return nNumbers;
+  }
+
   inline int minNumber() const {
     int m = numeric_limits<int>::max();
     for (int k=0;k<nNumbers;k++)
@@ -165,7 +171,7 @@ public:
   }
 
   //Add unchecked controls to the list
-  void addUncheckedPunches(vector<int> &mp, bool supportRogaining) const;
+  void addUncheckedPunches(vector<pair<int, pControl>> &mp, bool supportRogaining) const;
   //Start checking if all punches needed for this control exist
   void startCheckControl();
   //Get the number of a missing punch
@@ -181,9 +187,12 @@ public:
   ControlStatus getStatus() const {return Status;}
   const wstring getStatusS() const;
 
-  bool hasName() const {return !Name.empty();}
+  bool hasName() const {return !Name.empty() && Name != getDefaultName();}
   /// Get name or [id]
-  wstring getName() const;
+  const wstring &getName() const;
+  /// Get name or [id]
+  const wstring &getDefaultName() const;
+
   /// Get name or id
   wstring getIdS() const;
 
@@ -191,7 +200,7 @@ public:
     (Status == ControlStatus::StatusRogaining || Status == ControlStatus::StatusRogainingRequired);}
 
   void setStatus(ControlStatus st);
-  void setName(wstring name);
+  void setName(const wstring &name);
 
   bool isUnit() const;
   int getUnitCode() const;
@@ -225,7 +234,7 @@ public:
   int getRogainingPoints() const;
   wstring getRogainingPointsS() const;
   void setRogainingPoints(int v);
-  void setRogainingPoints(const string &t);
+  void setRogainingPoints(const wstring &t);
 
   /// Return first code number (or zero)
   int getFirstNumber() const;

@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@
 #include "meos_util.h"
 #include "progress.h"
 #include "meosexception.h"
+#include "oDataContainer.h"
 #include "gdioutput.h"
 
 //////////////////////////////////////////////////////////////////////
@@ -43,7 +44,7 @@ xmlparser::xmlparser() : utfConverter(gdi_main)
 {
   progress = 0;
   lastIndex = 0;
-  tagStackPointer=0;
+  tagStackPointer = 0;
   isUTF = false;
   cutMode = false;
   toString = false;
@@ -304,8 +305,7 @@ void xmlparser::write(const char *tag, const char *prop,
   write(tag, prop, wstring(propValue), value);
 }
 
-void xmlparser::write(const char *tag, int Value)
-{
+void xmlparser::write(const char *tag, int Value) {
   if (!cutMode || Value!=0) {
     char bf[256];
     sprintf_s(bf, "<%s>%d</%s>\n", tag, Value, tag);
@@ -313,6 +313,16 @@ void xmlparser::write(const char *tag, int Value)
     //fOut() << "<" << tag << ">"
     //       << Value
     //       << "</" << tag << ">" << endl;
+  }
+  if (!fOut().good())
+    throw meosException("Writing to XML file failed.");
+}
+
+void xmlparser::write(const char* tag, double value) {
+  if (!cutMode || value != 0.0) {
+    char bf[256];
+    sprintf_s(bf, "<%s>%s</%s>\n", tag, oDataContainer::formatDouble(value).c_str(), tag);
+    fOut() << bf;
   }
   if (!fOut().good())
     throw meosException("Writing to XML file failed.");
@@ -328,12 +338,20 @@ void xmlparser::writeTime(const char *tag, int relativeTime) {
     else if (subSec == 0 && relativeTime != -10) 
       sprintf_s(bf, "<%s>%d</%s>\n", tag, relativeTime / timeConstSecond, tag);
     else if (relativeTime >= 0)
-      sprintf_s(bf, "<%s>%d.%d</%s>\n", tag, (relativeTime / timeConstSecond), 
-                                             (relativeTime % timeConstSecond), tag);
+      if (timeConstSecond == 10)
+        sprintf_s(bf, "<%s>%d.%d</%s>\n", tag, (relativeTime / timeConstSecond), 
+                                               (relativeTime % timeConstSecond), tag);
+      else
+        sprintf_s(bf, "<%s>%d.%02d</%s>\n", tag, (relativeTime / timeConstSecond),
+                                                 (relativeTime % timeConstSecond), tag);
     else {
       int at = std::abs(relativeTime);
-      sprintf_s(bf, "<%s>-%d.%d</%s>\n", tag, (at / timeConstSecond),
-                                              (at % timeConstSecond), tag);
+      if (timeConstSecond == 10)
+        sprintf_s(bf, "<%s>-%d.%d</%s>\n", tag, (at / timeConstSecond),
+                                                (at % timeConstSecond), tag);
+      else
+        sprintf_s(bf, "<%s>-%d.%02d</%s>\n", tag, (at / timeConstSecond),
+                                                  (at % timeConstSecond), tag);
     }
     fOut() << bf;
   }
@@ -359,13 +377,21 @@ void xmlparser::writeBool(const char *tag, bool value)
     throw meosException("Writing to XML file failed.");
 }
 
-
-void xmlparser::write64(const char *tag, __int64 Value)
-{
-  if (!cutMode || Value!=0) {
+void xmlparser::write64(const char* tag, int64_t value) {
+  if (!cutMode || value!=0) {
     fOut() << "<" << tag << ">"
-           << Value
+           << value
            << "</" << tag << ">\n";
+  }
+  if (!fOut().good())
+    throw meosException("Writing to XML file failed.");
+}
+
+void xmlparser::write64u(const char* tag, uint64_t value) {
+  if (!cutMode || value != 0) {
+    fOut() << "<" << tag << ">"
+      << value
+      << "</" << tag << ">\n";
   }
   if (!fOut().good())
     throw meosException("Writing to XML file failed.");
@@ -1128,4 +1154,40 @@ const wchar_t *xmlattrib::getWPtr() const
   }
   else
     return nullptr;
+}
+
+int64_t xmlobject::getObjectInt64(const char* pname) const {
+  xmlobject x(getObject(pname));
+  if (x)
+    return x.getInt64();
+  else {
+    xmlattrib xa(getAttrib(pname));
+    if (xa)
+      return xa.getInt64();
+  }
+  return 0;
+}
+
+uint64_t xmlobject::getObjectInt64u(const char* pname) const {
+  xmlobject x(getObject(pname));
+  if (x)
+    return x.getInt64u();
+  else {
+    xmlattrib xa(getAttrib(pname));
+    if (xa)
+      return xa.getInt64u();
+  }
+  return 0;
+}
+
+double xmlobject::getObjectDouble(const char* pname) const {
+  xmlobject x(getObject(pname));
+  if (x)
+    return x.getDouble();
+  else {
+    xmlattrib xa(getAttrib(pname));
+    if (xa)
+      return xa.getDouble();
+  }
+  return 0;
 }

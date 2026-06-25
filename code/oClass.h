@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -154,12 +154,23 @@ public:
   static void getSplitMethods(vector< pair<wstring, size_t> > &methods);
   static void getSeedingMethods(vector< pair<wstring, size_t> > &methods);
 
+  struct RogainingStat {
+    int bestTime = -1;
+    int numCompetitors = 0;
+    double globalBest = 0.0;
+  };
+
+  struct RogainingLeg : public RogainingStat {
+    int from = -1;
+    int to = -1;
+  };
+
 protected:
   wstring Name;
   pCourse Course;
 
-  vector< vector<pCourse> > MultiCourse;
-  vector< oLegInfo > legInfo;
+  vector<vector<pCourse>> MultiCourse;
+  vector<oLegInfo> legInfo;
 
   //First: best time on leg
   //Second: Total leader time (total leader)
@@ -313,8 +324,8 @@ protected:
   /** Pairs of changed entities. (Leg number, control id (or PunchFinish))
     (-1,-1) means all (leg, -1) means all on leg.
   */
-  map< int, set<int> > sqlChangedControlLeg;
-  map< int, set<int> > sqlChangedLegControl;
+  map<int, set<int>> sqlChangedControlLeg;
+  map<int, set<int>> sqlChangedLegControl;
 
   void markSQLChanged(int leg, int control);
 
@@ -375,11 +386,26 @@ protected:
     DNS,
     IncludeNotCompeting
   };
+  
+  DataRevisionCache<map<pair<int, int>, RogainingStat>> rogainingStatistics;
 
   static string getCountTypeKey(int leg, CountKeyType type, bool countVacant);
 
   void configureInstance(int instance, bool allowCreation) const;
 public:
+
+  struct RogainingAnalysis {
+    int bestTime = -1;
+    int lostTime = -1;
+    int legPlace = 0;
+    int numLegRunners = 0;
+  };
+
+  /** Get best rogaining time for leg, and expected time given base speed*/
+  RogainingAnalysis getRogainingAnalysis(int from, int to, double baseSpeed) const;
+
+  /** Get class statistics rogaining legs */
+  vector<RogainingLeg> getRogainingLegs() const;
 
   static const shared_ptr<Table> &getTable(oEvent *oe);
 
@@ -411,7 +437,7 @@ public:
 
   bool isTeamClass() const {
     int ns = getNumStages();
-    return ns > 0 && getNumDistinctRunners() == 1;
+    return ns > 0 && getNumDistinctRunners() > 1;
   }
 
   /** Returns the number of possible final classes.*/
@@ -615,6 +641,7 @@ public:
 
   void setIgnoreStartPunch(bool ignoreStartPunch);
   bool ignoreStartPunch() const;
+  void updatedIgnoreStartPunch(); // Do side effects
 
   void setFreeStart(bool freeStart);
   bool hasFreeStart() const;
@@ -709,7 +736,7 @@ public:
   PersonSex getSex() const;
   void setSex(PersonSex sex);
 
-  wstring getStart() const;
+  const wstring &getStart() const;
   void setStart(const wstring &start);
 
   int getBlock() const;
@@ -756,6 +783,10 @@ public:
   void getParallelOptionalRange(int leg, int& parLegRangeMin, int& parLegRangeMax) const;
 
   bool hasAnyCourse(const set<int> &crsId) const;
+
+  // In a multi stage competition, some classes only use single stage results (no total result)
+  bool isSingleStageOnly() const;
+  void setSingleStageOnly(bool singleStageOnly);
 
   GeneralResult *getResultModule() const;
   void setResultModule(const string &tag);

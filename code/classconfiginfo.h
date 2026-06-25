@@ -2,7 +2,7 @@
 
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@ public:
   vector<int> relay;
   vector<int> patrol;
   vector<int> rogainingTeam;
+  vector<int> rogainingPatrol;
 
   vector< vector<int> > legNStart;
   vector< vector<int> > raceNStart;
@@ -67,6 +68,7 @@ public:
   bool hasPatrol() const {return patrol.size()>0;}
   bool hasRogaining() const {return rogainingClasses.size()>0;}
   bool hasRogainingTeam() const { return rogainingTeam.size()>0; }
+  bool hasRogainingPatrol() const { return rogainingPatrol.size() > 0; }
 
   bool empty() const;
 
@@ -78,6 +80,7 @@ public:
   void getTeamClass(set<int> &sel) const;
   void getRogaining(set<int> &sel) const;
   void getRogainingTeam(set<int> &sel) const;
+  void getRogainingPatrol(set<int> &sel) const;
 
   bool hasTeamClass() const;
   bool hasQualificationFinal() const;

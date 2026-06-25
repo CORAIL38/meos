@@ -1,7 +1,7 @@
 ﻿#pragma once
 /************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -280,7 +280,10 @@ class PunchMachine :
   public AutoMachine
 {
 protected:
-  int radio;
+  bool fullRadio = false;
+  int approxRunningTime = timeConstMinute * 10;
+  vector<tuple<int, int, int>> punchesTimeCodeCardNo;
+  vector<pair<int, shared_ptr<SICard>>> cardsByTime;
 public:
   shared_ptr<AutoMachine> clone() const final { 
     return make_shared<PunchMachine>(*this);
@@ -291,7 +294,7 @@ public:
   void process(gdioutput &gdi, oEvent *oe, AutoSyncType ast) final;
   void save(oEvent &oe, gdioutput &gdi, bool doProcess) final;
 
-  PunchMachine():AutoMachine("Stämplingsautomat", Machines::mPunchMachine), radio(0) {}
+  PunchMachine() : AutoMachine("Stämplingsautomat", Machines::mPunchMachine) {}
   friend class TabAuto;
 };
 

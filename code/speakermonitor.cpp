@@ -1,6 +1,6 @@
 ﻿/************************************************************************
     MeOS - Orienteering Software
-    Copyright (C) 2009-2025 Melin Software HB
+    Copyright (C) 2009-2026 Melin Software HB
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -53,7 +53,7 @@ void SpeakerMonitor::setClassFilter(const set<int> &filter, const set<int> &cfil
   classFilter = filter;
   controlIdFilter = cfilter;
   oListInfo li;
-  maxClassNameWidth = oe.gdiBase().scaleLength(li.getMaxCharWidth(oe, classFilter, EPostType::lClassName, L"", gdiFonts::normalText));
+  maxClassNameWidth = oe.gdiBase().scaleLength(li.getMaxCharWidth(oe, classFilter, EPostType::lClassName, -1, L"", gdiFonts::normalText));
 }
 
 void SpeakerMonitor::setLimits(int place, int num) {
@@ -164,7 +164,7 @@ void SpeakerMonitor::renderResult(gdioutput &gdi,
   else if (order < max(2, numLimit/20)) {
     return;
   }
-  else if (res.status == StatusNotCompetiting) {
+  else if (res.status == StatusNotCompeting) {
     return; // DQ on ealier leg, for example
   }
 
