@@ -489,6 +489,7 @@ void InfoMeosStatus::serialize(xmlbuffer &xml, bool diffOnly) const {
   prop.push_back(make_pair("version", getMeosCompectVersion()));
   prop.push_back(make_pair("eventNameId", eventNameId));
   prop.push_back(make_pair("onDatabase", itow(onDatabase)));		// 1 is true, 0 is false
+  prop.push_back(make_pair("eventId", itow(eventId)));
 
   xml.write("status", prop, L"");
 }

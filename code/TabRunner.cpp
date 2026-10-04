@@ -321,7 +321,7 @@ void TabRunner::selectRunner(gdioutput &gdi, pRunner r) {
     else
       gdi.setText("PlaceIn", makeDash(L"-"));
 
-    gdi.setText("TimeIn", r->getInputTimeS());
+    gdi.setText("TimeIn", r->getInputTimeS(false));
     if (gdi.hasWidget("PointIn"))
       gdi.setText("PointIn", oe->formatScore(r->getInputPoints()));
   }
@@ -2202,7 +2202,7 @@ void TabRunner::teamReport(oEvent& oe, gdioutput& gdi,
       int nextLeg = leg;
       while (++nextLeg < t->getNumRunners()) {
         int legNrN, legOrdN;
-        cls->splitLegNumberParallel(leg, legNrN, legOrdN);
+        cls->splitLegNumberParallel(nextLeg, legNrN, legOrdN);
         if (legNrN == legNr + 1) {
           nextR = t->getRunner(nextLeg);
           nextSelected = nextR && selectedRunners.count(nextR->getId());
